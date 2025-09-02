@@ -102,7 +102,7 @@ TEST_CASE("Driver invalid include dirs") {
     const char* argv[] = {"testfoo", "-Ifoo/bar/baz/", "--isystem=foo/bar/baz/"};
     CHECK(driver.parseCommandLine(3, argv));
     CHECK(!driver.processOptions());
-    CHECK(stderrContains("warning: system include directory 'foo/bar/baz/':"));
+    CHECK(stderrContains("system include directory 'foo/bar/baz/':"));
     CHECK(stderrContains("no input files"));
 }
 
@@ -127,7 +127,7 @@ TEST_CASE("Driver invalid source file") {
     const char* argv[] = {"testfoo", "blah.sv"};
     CHECK(driver.parseCommandLine(2, argv));
     CHECK(!driver.processOptions());
-    CHECK(stderrContains("error: 'blah.sv':"));
+    CHECK(stderrContains("'blah.sv':"));
 }
 
 TEST_CASE("Driver file preprocess") {
@@ -354,7 +354,7 @@ TEST_CASE("Driver invalid library module file") {
     const char* argv[] = {"testfoo", "-vblah.sv"};
     CHECK(driver.parseCommandLine(2, argv));
     CHECK(!driver.processOptions());
-    CHECK(stderrContains("error: 'blah.sv':"));
+    CHECK(stderrContains("'blah.sv':"));
 }
 
 TEST_CASE("Driver parsing multiple input files") {
@@ -479,7 +479,7 @@ TEST_CASE("Driver unknown command file") {
     auto args = fmt::format("testfoo -F \"asdfasdf\"", findTestDir());
     CHECK(!driver.parseCommandLine(args));
     CHECK(!driver.processOptions());
-    CHECK(stderrContains("error: command file 'asdfasdf':"));
+    CHECK(stderrContains("command file 'asdfasdf':"));
 }
 
 TEST_CASE("Driver allow defines to be inherited to lib files") {
@@ -668,7 +668,7 @@ TEST_CASE("Driver checking for infinite command file includes") {
     auto testDir = findTestDir();
     auto args = fmt::format("testfoo -F \"{0}infinite.f\"", testDir);
     CHECK(!driver.parseCommandLine(args));
-    CHECK(stderrContains("error: command file "));
+    CHECK(stderrContains("command file "));
     CHECK(stderrContains("includes itself recursively"));
 }
 
@@ -682,7 +682,7 @@ TEST_CASE("Driver checking for infinite library map includes") {
     auto args = fmt::format("testfoo --libmap \"{0}infinite.map\"", testDir);
     CHECK(driver.parseCommandLine(args));
     CHECK(!driver.processOptions());
-    CHECK(stderrContains("error: library map "));
+    CHECK(stderrContains("library map "));
     CHECK(stderrContains("includes itself recursively"));
 }
 
@@ -842,8 +842,7 @@ TEST_CASE("Driver basic dependency pruning") {
         driver.optionallyWriteDepFiles();
 
         CHECK(OS::capturedStdout == "");
-        CHECK(OS::capturedStderr ==
-              "warning: top module 'unknownModule' not found in any source file\n");
+        CHECK(OS::capturedStderr == "top module 'unknownModule' not found in any source file");
     }
 }
 
@@ -916,8 +915,8 @@ TEST_CASE("Driver deplist missing dependencies") {
     driver.optionallyWriteDepFiles();
 
     CHECK(OS::capturedStdout == "moduleA.sv\n");
-    CHECK(OS::capturedStderr == "warning: 'missingModule' not found in any source file\n  note: "
-                                "referenced in file 'moduleA.sv'\n");
+    CHECK(OS::capturedStderr ==
+          "'missingModule' not found in any source file  note: referenced in file 'moduleA.sv'\n");
 }
 
 TEST_CASE("Driver deplist missing top modules") {
@@ -933,7 +932,7 @@ TEST_CASE("Driver deplist missing top modules") {
     driver.optionallyWriteDepFiles();
 
     CHECK(OS::capturedStdout == "");
-    CHECK(stderrContains("warning: using --depfile-trim with no top modules"));
+    CHECK(stderrContains("using --depfile-trim with no top modules"));
 }
 
 TEST_CASE("Driver compat mode all") {
