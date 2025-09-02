@@ -9,6 +9,7 @@
 
 #include <filesystem>
 #include <fmt/color.h>
+#include <functional>
 
 #include "slang/util/ScopeGuard.h"
 #include "slang/util/SmallVector.h"
@@ -54,13 +55,32 @@ public:
     /// Prints formatted text to stderr.
     static void printE(std::string_view text);
 
+    /// Prints error to stderr.
+    static void printError(std::string_view text);
+
+    /// Prints warning to stderr.
+    static void printWarning(std::string_view text);
+
     /// Prints colored formatted text to stderr.
     static void printE(const fmt::text_style& style, std::string_view text);
 
     static std::string getEnv(const std::string& name);
     static std::string parseEnvVar(const char*& ptr, const char* end);
 
-    static auto captureOutput() {
+    static void defaultCallback(std::string_view text, bool isStdout) {
+        // Default callback appends to the captured output
+        if (isStdout)
+            capturedStdout += text;
+        else
+            capturedStderr += text;
+    }
+
+    // take in a callback to be called when the output is captured
+    static auto captureOutput(
+        std::function<void(std::string_view, bool)>&& callback = defaultCallback) {
+        // check if cb is null/not given
+
+        outputCallback = callback;
         capturedStdout.clear();
         capturedStderr.clear();
 
@@ -77,6 +97,7 @@ private:
     static inline bool showColorsStdout = false;
     static inline bool showColorsStderr = false;
     static inline bool capturingOutput = false;
+    static inline std::function<void(std::string_view, bool)> outputCallback = defaultCallback;
 };
 
 } // namespace slang
