@@ -373,12 +373,11 @@ InstanceSymbol::InstanceSymbol(Compilation& compilation, std::string_view name, 
 InstanceSymbol& InstanceSymbol::createDefault(Compilation& comp, const DefinitionSymbol& definition,
                                               const HierarchyOverrideNode* hierarchyOverrideNode,
                                               const ConfigBlockSymbol* configBlock,
-                                              const ConfigRule* configRule,
-                                              SourceLocation locationOverride) {
-    auto loc = locationOverride ? locationOverride : definition.location;
-    auto& body = InstanceBodySymbol::fromDefinition(comp, definition, loc, InstanceFlags::None,
-                                                    hierarchyOverrideNode, configBlock, configRule);
-    auto& result = *comp.emplace<InstanceSymbol>(definition.name, loc, body, 0u);
+                                              const ConfigRule* configRule) {
+    auto& body = InstanceBodySymbol::fromDefinition(comp, definition, definition.location,
+                                                    InstanceFlags::None, hierarchyOverrideNode,
+                                                    configBlock, configRule);
+    auto& result = *comp.emplace<InstanceSymbol>(definition.name, definition.location, body, 0u);
 
     if (configBlock) {
         auto rc = comp.emplace<ResolvedConfig>(*configBlock, result);
@@ -506,7 +505,8 @@ void InstanceSymbol::fromSyntax(Compilation& comp, const HierarchyInstantiationS
 
     // If this instance is not instantiated then we'll just fill in a placeholder
     // and move on. This is likely inside an untaken generate branch.
-    if (flags.has(InstanceFlags::Uninstantiated)) {
+    if (flags.has(InstanceFlags::Uninstantiated) &&
+        !comp.hasFlag(CompilationFlags::UntakenGenerateChecks)) {
         UninstantiatedDefSymbol::fromSyntax(comp, syntax, context, results, implicitNets);
         return;
     }
@@ -860,8 +860,14 @@ static Symbol* recurseDefaultIfaceInst(Compilation& comp, const InterfacePortSym
                                        std::span<const ConstantRange>::iterator it,
                                        std::span<const ConstantRange>::iterator end) {
     if (it == end) {
-        auto& result = InstanceSymbol::createDefault(comp, *port.interfaceDef, nullptr, nullptr,
-                                                     nullptr, port.location);
+        auto& def = *port.interfaceDef;
+        ParameterBuilder paramBuilder(*def.getParentScope(), def.name, def.parameters);
+        paramBuilder.setUseInvalidForMissing(true);
+        // TODO: set parameters based on $static_assert constraints.
+        auto& body = InstanceBodySymbol::fromDefinition(comp, def, port.location, paramBuilder,
+                                                        InstanceFlags::None);
+
+        auto& result = *comp.emplace<InstanceSymbol>(port.name, port.location, body, 0u);
 
         if (!firstInst)
             firstInst = &result;
@@ -962,7 +968,15 @@ InstanceBodySymbol& InstanceBodySymbol::fromDefinition(
 
     ParameterBuilder paramBuilder(*definition.getParentScope(), definition.name,
                                   definition.parameters);
-    paramBuilder.setForceInvalidValues(flags.has(InstanceFlags::Uninstantiated));
+
+    if (flags.has(InstanceFlags::Uninstantiated)) {
+        paramBuilder.setForceInvalidValues(true);
+    }
+    else if (compilation.hasFlag(CompilationFlags::AllowInvalidTop) &&
+             instanceLoc == definition.location) {
+        paramBuilder.setUseInvalidForMissing(true);
+    }
+
     if (hierarchyOverrideNode)
         paramBuilder.setOverrides(hierarchyOverrideNode);
 

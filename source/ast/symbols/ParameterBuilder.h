@@ -31,7 +31,12 @@ public:
 
     void setAssignments(const syntax::ParameterValueAssignmentSyntax& syntax, bool isFromConfig);
     void setOverrides(const HierarchyOverrideNode* newVal) { overrideNode = newVal; }
+    /// Force invalid values (error type) for all parameters.
     void setForceInvalidValues(bool set) { forceInvalidValues = set; }
+    /// Set invalid values (error type) for parameters that are missing values, rather than
+    /// reporting errors.
+    void setUseInvalidForMissing(bool set) { useInvalidForMissing = set; }
+    /// Suppress error reporting for missing parameter values.
     void setSuppressErrors(bool set) { suppressErrors = set; }
     void setInstanceContext(const ASTContext& context) { instanceContext = &context; }
     void setConfigScope(const Scope& confScope) { configScope = &confScope; }
@@ -58,6 +63,7 @@ private:
     const HierarchyOverrideNode* overrideNode = nullptr;
     const Scope* configScope = nullptr;
     bool forceInvalidValues = false;
+    bool useInvalidForMissing = false;
     bool suppressErrors = false;
     bool anyErrors = false;
 };
