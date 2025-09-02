@@ -118,7 +118,14 @@ enum class SLANG_EXPORT CompilationFlags {
 
     /// Allow interface instances that are bind/defparam targets to be assigned
     /// to virtual interfaces.
-    AllowVirtualIfaceWithOverride = 1 << 14
+    AllowVirtualIfaceWithOverride = 1 << 14,
+
+    /// Allow tops without set params
+    AllowInvalidTop = 1 << 15,
+
+    /// Instantiate modules and other objects in untaken generate branches
+    //  to allow for more lints, like port and parameter name checks.
+    UntakenGenerateChecks = 1 << 16,
 };
 SLANG_BITMASK(CompilationFlags, AllowVirtualIfaceWithOverride)
 
