@@ -1176,7 +1176,8 @@ bool Driver::reportDiagnostics(bool quiet) {
         // If we're printing JSON diagnostics to stdout don't also
         // print the text diagnostics.
         hasDiagsStdout = true;
-        OS::print(jsonWriter->view());
+        if (jsonWriter)
+            OS::print(jsonWriter->view());
     }
     else {
         std::string diagStr = textDiagClient->getString();
