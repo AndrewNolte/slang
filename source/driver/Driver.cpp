@@ -517,7 +517,7 @@ bool Driver::processCommandFiles(std::string_view pattern, bool makeRelative, bo
     return true;
 }
 
-bool Driver::processOptions() {
+bool Driver::processOptions(bool checkFiles) {
     bool showColors;
     if (options.colorDiags.has_value())
         showColors = *options.colorDiags;
@@ -619,7 +619,7 @@ bool Driver::processOptions() {
     if (!reportLoadErrors())
         return false;
 
-    if (!sourceLoader.hasFiles()) {
+    if (checkFiles && !sourceLoader.hasFiles()) {
         printError("no input files");
         return false;
     }
