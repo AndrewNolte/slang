@@ -168,6 +168,9 @@ public:
     /// Determines whether this symbol represents a value.
     bool isValue() const;
 
+    /// Determines whether this symbol is instantiated.
+    bool isInstantiated() const;
+
     /// If the symbol has a declared type, returns a pointer to it. Otherwise returns nullptr.
     const DeclaredType* getDeclaredType() const;
 

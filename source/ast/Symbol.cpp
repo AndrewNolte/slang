@@ -87,6 +87,18 @@ const DeclaredType* Symbol::getDeclaredType() const {
     }
 }
 
+bool Symbol::isInstantiated() const {
+    auto symbol = this;
+    while (symbol) {
+        if (symbol->kind == SymbolKind::GenerateBlock)
+            return !(symbol->as<GenerateBlockSymbol>().isUninstantiated);
+
+        auto scope = symbol->getParentScope();
+        symbol = scope ? &scope->asSymbol() : nullptr;
+    }
+    return true;
+}
+
 static void getHierarchicalPathImpl(const Symbol& symbol, FormatBuffer& buffer) {
     auto scope = symbol.getParentScope();
     auto current = &symbol;
