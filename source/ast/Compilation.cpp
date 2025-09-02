@@ -329,6 +329,8 @@ const RootSymbol& Compilation::getRoot(bool skipDefParamsAndBinds) {
     auto guard = ScopeGuard([this] { finalizing = false; });
 
     auto isValidTop = [&](auto& definition) {
+        if (hasFlag(CompilationFlags::AllowInvalidTop))
+            return true;
         // All parameters must have defaults.
         for (auto& param : definition.parameters) {
             if (!param.hasDefault() &&
@@ -1671,21 +1673,11 @@ Diagnostic& Compilation::addDiag(Diagnostic diag) {
         return tempDiag;
     }
 
-    auto isSuppressed = [](const Symbol* symbol) {
-        while (symbol) {
-            if (symbol->kind == SymbolKind::GenerateBlock)
-                return symbol->as<GenerateBlockSymbol>().isUninstantiated;
-
-            auto scope = symbol->getParentScope();
-            symbol = scope ? &scope->asSymbol() : nullptr;
-        }
-        return false;
-    };
-
     // Filter out diagnostics that came from inside an uninstantiated generate block.
     SLANG_ASSERT(diag.symbol);
     SLANG_ASSERT(diag.location);
-    if (isSuppressed(diag.symbol)) {
+
+    if (!diag.symbol->isInstantiated()) {
         tempDiag = std::move(diag);
         return tempDiag;
     }

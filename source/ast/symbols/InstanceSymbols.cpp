@@ -953,7 +953,9 @@ InstanceBodySymbol& InstanceBodySymbol::fromDefinition(
 
     ParameterBuilder paramBuilder(*definition.getParentScope(), definition.name,
                                   definition.parameters);
-    paramBuilder.setForceInvalidValues(flags.has(InstanceFlags::Uninstantiated));
+
+    paramBuilder.setForceInvalidValues(flags.has(InstanceFlags::Uninstantiated) ||
+                                       compilation.hasFlag(CompilationFlags::AllGenerateBranches));
     if (hierarchyOverrideNode)
         paramBuilder.setOverrides(hierarchyOverrideNode);
 
