@@ -12,6 +12,14 @@ std::string getTestInclude() {
     return findTestDir() + "/include.svh";
 }
 
+static SmallVector<char> makeBuffer(std::string_view text) {
+    SmallVector<char> buffer;
+    buffer.insert(buffer.end(), text.begin(), text.end());
+    if (buffer.empty() || buffer.back() != '\0')
+        buffer.push_back('\0');
+    return buffer;
+}
+
 TEST_CASE("Read source") {
     SourceManager manager;
     std::string testPath = getTestInclude();
@@ -225,4 +233,22 @@ TEST_CASE("Display column with tabs") {
     SourceLocation loc3(buffer.id, 2); // 'b' at byte 2 (after tab)
     // Tab at position 2 expands to next 8-boundary, which is column 9
     CHECK(manager.getDisplayColumnNumber(loc3) == 9);
+}
+
+TEST_CASE("Replace assigned source buffer") {
+    SourceManager manager;
+
+    auto first = manager.assignText("replace_test.sv", "module first;\nendmodule\n");
+    auto retained = manager.retainBuffers(std::span(&first.id, 1));
+    REQUIRE(retained.size() == 1);
+    CHECK(manager.isLatestData(first.id));
+
+    auto second = manager.replaceBuffer(first.id, makeBuffer("module second;\nendmodule\n"));
+    CHECK(!manager.isLatestData(first.id));
+    CHECK(manager.isLatestData(second.id));
+
+    auto text = manager.getSourceText(second.id);
+    CHECK(text.starts_with("module second;\nendmodule\n"));
+    CHECK(text.back() == '\0');
+    CHECK(manager.getRawFileName(second.id) == "replace_test.sv");
 }
