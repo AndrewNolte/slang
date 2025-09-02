@@ -15,6 +15,7 @@
 #include <set>
 #include <shared_mutex>
 #include <span>
+#include <string_view>
 #include <variant>
 #include <vector>
 
@@ -84,6 +85,17 @@ public:
     /// UTF-8 character widths and tab expansion.
     /// @a location must be a file location.
     size_t getDisplayColumnNumber(SourceLocation location) const;
+
+    /// Gets a SourceLocation give a file, line and column.
+    std::optional<SourceLocation> getSourceLocation(std::string_view path, size_t lineNumber,
+                                                    size_t columnNumber) const;
+
+    std::optional<SourceLocation> getSourceLocation(std::string_view path, size_t offset) const;
+
+    std::optional<SourceLocation> getSourceLocation(BufferID buffer, size_t offset) const;
+
+    std::optional<SourceLocation> getSourceLocation(BufferID buffer, size_t lineNumber,
+                                                    size_t columnNumber) const;
 
     /// Gets a location that indicates from where the given buffer was included.
     /// @a location must be a file location.
@@ -165,6 +177,10 @@ public:
     /// Build the original location range where source is written.
     SourceRange getFullyOriginalRange(SourceRange range) const;
 
+    std::string_view getText(SourceRange range) const;
+
+    std::string_view getLine(BufferID buffer, uint32_t line) const;
+
     /// If the given location is a macro location, fully expands it out to its actual
     /// file expansion location. Otherwise just returns the location itself.
     SourceLocation getFullyExpandedLoc(SourceLocation location) const;
@@ -183,8 +199,7 @@ public:
     uint64_t getSortKey(BufferID buffer) const;
 
     /// Creates a macro expansion location; used by the preprocessor.
-    SourceLocation createExpansionLoc(SourceLocation originalLoc, SourceRange expansionRange,
-                                      bool isMacroArg);
+    SourceLocation createArgExpansionLoc(SourceLocation originalLoc, SourceRange expansionRange);
 
     /// Creates a macro expansion location; used by the preprocessor.
     SourceLocation createExpansionLoc(SourceLocation originalLoc, SourceRange expansionRange,
@@ -285,7 +300,67 @@ public:
     /// raw file content plus any cached line-offset tables.
     size_t getMemoryUsage() const;
 
-private:
+    /// Returns opaque handles that keep the buffer data alive.
+    /// Use this to retain buffer data for a compilation that needs to keep this data alive.
+    std::vector<std::shared_ptr<void>> retainBuffers(std::span<const BufferID> ids) const;
+
+    /// Replaces the buffer data for an existing BufferID with new content.
+    /// Creates a new FileInfo entry with new data and returns a new BufferID.
+    /// The old BufferID continues to point to the old (now stale) data, which will
+    /// be freed once no other references exist.
+    SourceBuffer replaceBuffer(BufferID id, SmallVector<char>&& buffer);
+
+    /// Re-reads a buffer from disk, updating the cache and marking old data as stale.
+    /// Returns the new SourceBuffer with fresh content, or an error if the read fails.
+    [[nodiscard]]
+    BufferOrError reloadBuffer(BufferID id);
+
+    /// Determines whether the given BufferID points to non-stale data.
+    bool isLatestData(BufferID id) const;
+
+    // Instead of a file, this lets a BufferID point to a macro expansion location.
+    // This is actually used two different ways:
+    //
+    // If this is a normal token from a
+    // macro expansion, originalLocation will point to the token inside the macro
+    // definition, and expansionRange will point to the range of the macro usage
+    // at the expansion site.
+    // `define Macro(arg) $info(arg)
+    //                    ^ original loc
+    // `Macro(1 + 2)
+    // ^^^^^^^^^^^^^ expansion range
+    //
+    // Alternatively, if this token came from an argument,
+    // originalLocation will point to the argument at the expansion site and
+    // expansionRange will point to the parameter inside the macro body.
+    // `define Macro(arg) $info(arg)
+    //                          ^^^ expansion range
+    //
+    // `Macro(1 + 2)
+    //        ^ original loc
+    struct ExpansionInfo {
+        SourceLocation originalLoc;
+        SourceRange expansionRange;
+        bool isMacroArg = false;
+
+        std::string_view macroName;
+
+        ExpansionInfo() = default;
+        ExpansionInfo(SourceLocation originalLoc, SourceRange expansionRange, bool isMacroArg) :
+            originalLoc(originalLoc), expansionRange(expansionRange), isMacroArg(isMacroArg) {}
+
+        ExpansionInfo(SourceLocation originalLoc, SourceRange expansionRange,
+                      std::string_view macroName) :
+            originalLoc(originalLoc), expansionRange(expansionRange), macroName(macroName) {}
+    };
+
+    std::optional<SourceManager::ExpansionInfo> getMacroInfo(SourceLocation location) const;
+
+    std::vector<SourceLocation> getMacroExpansions(SourceLocation location) const;
+
+    static void computeLineOffsets(std::string_view text, std::vector<size_t>& offsets) noexcept;
+
+protected:
     // Stores information specified in a `line directive, which alters the
     // line number and file name that we report in diagnostics.
     struct LineDirectiveInfo {
@@ -305,6 +380,7 @@ private:
         std::vector<size_t> lineOffsets;              // cache of compute line offsets
         const std::filesystem::path* const directory; // directory in which the file exists
         const std::filesystem::path fullPath;         // full path to the file
+        bool isStale = false; // Is pointing at stale data (path has newer contents elsewhere)
 
         FileData(const std::filesystem::path* directory, std::string name, SmallVector<char>&& data,
                  std::filesystem::path fullPath) :
@@ -315,46 +391,22 @@ private:
     // Stores a pointer to file data along with information about where we included it.
     // There can potentially be many of these for a given file.
     struct FileInfo {
-        FileData* data = nullptr;
+        std::shared_ptr<FileData> data;
         const SourceLibrary* library = nullptr;
         SourceLocation includedFrom;
         uint64_t sortKey = 0;
         BufferKind bufferKind = BufferKind::DesignFile;
         std::vector<LineDirectiveInfo> lineDirectives;
 
-        FileInfo() {}
-
-        FileInfo(FileData* data, const SourceLibrary* library, SourceLocation includedFrom,
-                 uint64_t sortKey) :
-            data(data), library(library), includedFrom(includedFrom), sortKey(sortKey),
+        FileInfo() = default;
+        FileInfo(std::shared_ptr<FileData> data, const SourceLibrary* library,
+                 SourceLocation includedFrom, uint64_t sortKey) :
+            data(std::move(data)), library(library), includedFrom(includedFrom), sortKey(sortKey),
             bufferKind(includedFrom.valid() ? BufferKind::IncludeFile : BufferKind::DesignFile) {}
 
         // Returns a pointer to the LineDirectiveInfo for the nearest enclosing
         // line directive of the given raw line number, or nullptr if there is none
         const LineDirectiveInfo* getPreviousLineDirective(size_t rawLineNumber) const;
-    };
-
-    // Instead of a file, this lets a BufferID point to a macro expansion location.
-    // This is actually used two different ways; if this is a normal token from a
-    // macro expansion, originalLocation will point to the token inside the macro
-    // definition, and expansionLocation will point to the range of the macro usage
-    // at the expansion site. Alternatively, if this token came from an argument,
-    // originalLocation will point to the argument at the expansion site and
-    // expansionLocation will point to the parameter inside the macro body.
-    struct ExpansionInfo {
-        SourceLocation originalLoc;
-        SourceRange expansionRange;
-        bool isMacroArg = false;
-
-        std::string_view macroName;
-
-        ExpansionInfo() {}
-        ExpansionInfo(SourceLocation originalLoc, SourceRange expansionRange, bool isMacroArg) :
-            originalLoc(originalLoc), expansionRange(expansionRange), isMacroArg(isMacroArg) {}
-
-        ExpansionInfo(SourceLocation originalLoc, SourceRange expansionRange,
-                      std::string_view macroName) :
-            originalLoc(originalLoc), expansionRange(expansionRange), macroName(macroName) {}
     };
 
     // This mutex protects pretty much everything in this class.
@@ -368,8 +420,7 @@ private:
     std::vector<std::variant<FileInfo, ExpansionInfo>> bufferEntries;
 
     // cache for file lookups; this holds on to the actual file data
-    flat_hash_map<std::string, std::pair<std::unique_ptr<FileData>, std::error_code>> lookupCache;
-
+    flat_hash_map<std::string, std::pair<std::shared_ptr<FileData>, std::error_code>> lookupCache;
     // directories for system and user includes
     std::vector<std::filesystem::path> systemDirectories;
     std::vector<std::filesystem::path> userDirectories;
@@ -397,15 +448,23 @@ private:
     template<IsLock TLock>
     const FileInfo* getFileInfo(BufferID buffer, TLock& lock) const;
 
-    SourceBuffer createBufferEntry(FileData* fd, SourceLocation includedFrom,
+    SourceBuffer createBufferEntry(std::shared_ptr<FileData> fd, SourceLocation includedFrom,
                                    const SourceLibrary* library, uint64_t sortKey,
+                                   std::unique_lock<std::shared_mutex>& lock);
+
+    SourceBuffer replaceBufferImpl(FileInfo* oldInfo, SmallVector<char>&& buffer,
                                    std::unique_lock<std::shared_mutex>& lock);
 
     BufferOrError openCached(const std::filesystem::path& fullPath, SourceLocation includedFrom,
                              const SourceLibrary* library, uint64_t sortKey = UINT64_MAX);
+
     SourceBuffer cacheBuffer(std::filesystem::path&& path, std::string&& pathStr,
                              SourceLocation includedFrom, const SourceLibrary* library,
                              uint64_t sortKey, SmallVector<char>&& buffer);
+
+    template<IsLock TLock>
+    std::optional<slang::SourceManager::FileData*> computeOffsets(BufferID buffer,
+                                                                  TLock& readLock) const;
 
     template<IsLock TLock>
     size_t getRawLineNumber(SourceLocation location, TLock& lock) const;
