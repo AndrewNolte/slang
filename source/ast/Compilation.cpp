@@ -16,6 +16,7 @@
 #include "slang/ast/SystemSubroutine.h"
 #include "slang/ast/types/TypePrinter.h"
 #include "slang/diagnostics/DiagnosticEngine.h"
+#include "slang/diagnostics/ExpressionsDiags.h"
 #include "slang/diagnostics/LookupDiags.h"
 #include "slang/parsing/Parser.h"
 #include "slang/parsing/Preprocessor.h"
@@ -316,6 +317,8 @@ const RootSymbol& Compilation::getRoot(bool skipDefParamsAndBinds) {
     auto guard = ScopeGuard([this] { finalizing = false; });
 
     auto isValidTop = [&](auto& definition) {
+        if (hasFlag(CompilationFlags::AllowInvalidTop))
+            return true;
         // All parameters must have defaults.
         for (auto& param : definition.parameters) {
             if (!param.hasDefault() &&
@@ -1686,6 +1689,10 @@ void Compilation::addDiagnostics(const Diagnostics& diagnostics) {
         addDiag(diag);
 }
 
+bool alwaysBlockedUntakenDiag(const DiagCode& code) {
+    return code == diag::IndexOOB || code == diag::ScopeIndexOutOfRange;
+}
+
 Diagnostic& Compilation::addDiag(Diagnostic diag) {
     SLANG_ASSERT(!isFrozen());
 
@@ -1694,23 +1701,16 @@ Diagnostic& Compilation::addDiag(Diagnostic diag) {
         return tempDiag;
     }
 
-    auto isSuppressed = [](const Symbol* symbol) {
-        while (symbol) {
-            if (symbol->kind == SymbolKind::GenerateBlock)
-                return symbol->as<GenerateBlockSymbol>().isUninstantiated;
-
-            auto scope = symbol->getParentScope();
-            symbol = scope ? &scope->asSymbol() : nullptr;
-        }
-        return false;
-    };
-
     // Filter out diagnostics that came from inside an uninstantiated generate block.
     SLANG_ASSERT(diag.symbol);
     SLANG_ASSERT(diag.location);
-    if (isSuppressed(diag.symbol)) {
-        tempDiag = std::move(diag);
-        return tempDiag;
+
+    if (!diag.symbol->isInstantiated()) {
+        if (!hasFlag(CompilationFlags::UntakenGenerateChecks) ||
+            alwaysBlockedUntakenDiag(diag.code)) {
+            tempDiag = std::move(diag);
+            return tempDiag;
+        }
     }
 
     const bool isError = diag.isError();
@@ -2447,7 +2447,8 @@ std::pair<Compilation::DefinitionLookupResult, bool> Compilation::resolveConfigR
 
 Diagnostic* Compilation::errorMissingDef(std::string_view name, const Scope& scope,
                                          SourceRange sourceRange, DiagCode code) const {
-    if (hasFlag(CompilationFlags::IgnoreUnknownModules) || scope.isUninstantiated() || name.empty())
+    if (hasFlag(CompilationFlags::IgnoreUnknownModules) || name.empty() ||
+        (scope.isUninstantiated() && !hasFlag(CompilationFlags::UntakenGenerateChecks)))
         return nullptr;
 
     if (auto def = getExternDefinition(name, scope)) {
