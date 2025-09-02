@@ -7,10 +7,15 @@
 //------------------------------------------------------------------------------
 #include "slang/text/SourceManager.h"
 
+#include <mutex>
+#include <optional>
+#include <shared_mutex>
 #include <string>
+#include <string_view>
 
 #include "slang/text/CharInfo.h"
 #include "slang/text/Glob.h"
+#include "slang/text/SourceLocation.h"
 #include "slang/util/OS.h"
 #include "slang/util/SmallMap.h"
 #include "slang/util/String.h"
@@ -133,6 +138,49 @@ size_t SourceManager::getDisplayColumnNumber(SourceLocation location) const {
     return displayColumn + 1; // +1 for 1-based column numbering
 }
 
+std::optional<SourceLocation> SourceManager::getSourceLocation(BufferID buffer, size_t lineNumber,
+                                                               size_t columnNumber) const {
+    std::shared_lock<std::shared_mutex> lock(mutex);
+    auto fd = computeOffsets(buffer, lock);
+    if (!fd)
+        return std::nullopt;
+
+    auto& lineOffsets = (*fd)->lineOffsets;
+    if (lineOffsets.size() <= lineNumber)
+        return std::nullopt;
+
+    uint64_t charOffset = lineOffsets[lineNumber] + columnNumber;
+    return std::optional(slang::SourceLocation(buffer, charOffset));
+}
+
+std::optional<SourceLocation> SourceManager::getSourceLocation(BufferID buffer,
+                                                               size_t offset) const {
+    std::shared_lock<std::shared_mutex> lock(mutex);
+    auto fd = computeOffsets(buffer, lock);
+    if (!fd)
+        return std::nullopt;
+
+    return std::optional(slang::SourceLocation(buffer, offset));
+}
+
+std::optional<SourceLocation> SourceManager::getSourceLocation(std::string_view targetPath,
+                                                               size_t offset) const {
+    std::shared_lock<std::shared_mutex> lock(mutex);
+    fs::path targetFp(fs::absolute(targetPath));
+
+    for (const auto bufferID : getAllBuffers()) {
+        const auto& fp = getFullPath(bufferID);
+        if (targetFp.compare(fp) == 0) {
+            auto fd = computeOffsets(bufferID, lock);
+            if (!fd) {
+                return std::nullopt;
+            }
+            return std::optional(slang::SourceLocation(bufferID, offset));
+        }
+    }
+    return std::nullopt;
+}
+
 std::string_view SourceManager::getFileName(SourceLocation location) const {
     std::shared_lock<std::shared_mutex> lock(mutex);
     SourceLocation fileLocation = getFullyExpandedLocImpl(location, lock);
@@ -227,6 +275,24 @@ std::string_view SourceManager::getMacroName(SourceLocation location) const {
         return {};
 
     return info->macroName;
+}
+
+std::optional<SourceManager::ExpansionInfo> SourceManager::getMacroInfo(
+    SourceLocation location) const {
+    std::shared_lock<std::shared_mutex> lock(mutex);
+    while (isMacroArgLocImpl(location, lock))
+        location = getExpansionRangeImpl(location, lock).start();
+
+    auto buffer = location.buffer();
+    if (!buffer)
+        return std::nullopt;
+
+    SLANG_ASSERT(buffer.getId() < bufferEntries.size());
+    auto info = std::get_if<ExpansionInfo>(&bufferEntries[buffer.getId()]);
+    if (!info)
+        return std::nullopt;
+
+    return *info;
 }
 
 bool SourceManager::isFileLoc(SourceLocation location) const {
@@ -324,6 +390,23 @@ SourceRange SourceManager::getExpansionRange(SourceLocation location) const {
     return getExpansionRangeImpl(location, lock);
 }
 
+std::vector<SourceLocation> SourceManager::getMacroExpansions(SourceLocation loc) const {
+    std::shared_lock<std::shared_mutex> lock(mutex);
+    SmallVector<SourceLocation, 8> expansions;
+    while (isMacroLocImpl(loc, lock)) {
+        auto exp = std::get<ExpansionInfo>(bufferEntries[loc.buffer().getId()]);
+        if (isMacroArgLocImpl(loc, lock)) {
+            expansions.push_back(exp.expansionRange.start());
+            loc = exp.originalLoc + loc.offset();
+        }
+        else {
+            expansions.push_back(loc);
+            loc = exp.expansionRange.start();
+        }
+    }
+    return std::vector<SourceLocation>(expansions.begin(), expansions.end());
+}
+
 SourceLocation SourceManager::getOriginalLoc(SourceLocation location) const {
     std::shared_lock<std::shared_mutex> lock(mutex);
     return getOriginalLocImpl(location, lock);
@@ -340,6 +423,44 @@ SourceRange SourceManager::getFullyOriginalRange(SourceRange range) const {
     SourceLocation start(getFullyOriginalLoc(range.start()));
     SourceLocation end(getFullyOriginalLoc(range.end()));
     return SourceRange(start, end);
+}
+
+// Only use for macro ranges, otherwise use a syntax printer
+std::string_view SourceManager::getText(SourceRange range) const {
+    if (range == SourceRange::NoLocation) {
+        return "";
+    }
+    if (range.start().buffer() != range.end().buffer()) {
+        return "";
+    }
+    std::shared_lock<std::shared_mutex> lock(mutex);
+    auto info = getFileInfo(range.start().buffer(), lock);
+    if (!info || !info->data)
+        return "";
+
+    auto fd = info->data;
+    size_t start = range.start().offset();
+    size_t end = range.end().offset();
+    if (end > fd->mem.size())
+        end = fd->mem.size();
+
+    return std::string_view(fd->mem.data() + start, end - start);
+}
+
+std::string_view SourceManager::getLine(BufferID buffer, uint32_t line) const {
+    std::shared_lock<std::shared_mutex> lock(mutex);
+    std::optional<slang::SourceManager::FileData*> fdOpt = computeOffsets(buffer, lock);
+    if (!fdOpt) {
+        return {};
+    }
+    auto fd = *fdOpt;
+    SLANG_ASSERT(line <= fd->lineOffsets.size());
+    auto start = line == 0 ? 0 : fd->lineOffsets[line - 1];
+    if (line == fd->lineOffsets.size()) {
+        return std::string_view(fd->mem.data() + start, fd->mem.size() - start);
+    }
+    auto end = fd->lineOffsets[line];
+    return std::string_view(fd->mem.data() + start, end - start);
 }
 
 SourceLocation SourceManager::getFullyExpandedLoc(SourceLocation location) const {
@@ -366,11 +487,11 @@ uint64_t SourceManager::getSortKey(BufferID buffer) const {
     return info->sortKey;
 }
 
-SourceLocation SourceManager::createExpansionLoc(SourceLocation originalLoc,
-                                                 SourceRange expansionRange, bool isMacroArg) {
+SourceLocation SourceManager::createArgExpansionLoc(SourceLocation originalLoc,
+                                                    SourceRange expansionRange) {
     std::unique_lock<std::shared_mutex> lock(mutex);
 
-    bufferEntries.emplace_back(ExpansionInfo(originalLoc, expansionRange, isMacroArg));
+    bufferEntries.emplace_back(ExpansionInfo(originalLoc, expansionRange, true));
     return SourceLocation(BufferID((uint32_t)(bufferEntries.size() - 1), ""sv), 0);
 }
 
@@ -577,6 +698,53 @@ size_t SourceManager::getMemoryUsage() const {
     return total;
 }
 
+std::vector<std::shared_ptr<void>> SourceManager::retainBuffers(
+    std::span<const BufferID> ids) const {
+    std::shared_lock<std::shared_mutex> lock(mutex);
+    std::vector<std::shared_ptr<void>> result;
+    result.reserve(ids.size());
+    for (auto id : ids) {
+        auto info = getFileInfo(id, lock);
+        if (info && info->data)
+            result.push_back(info->data);
+    }
+    return result;
+}
+
+SourceBuffer SourceManager::replaceBuffer(BufferID id, SmallVector<char>&& buffer) {
+    std::unique_lock<std::shared_mutex> lock(mutex);
+
+    auto oldInfo = getFileInfo(id, lock);
+    SLANG_ASSERT(oldInfo && oldInfo->data);
+
+    auto oldData = oldInfo->data;
+
+    // Mark old data as stale, remove reference
+    oldInfo->data.reset();
+    oldData->isStale = true;
+
+    // Create new FileData with the new buffer content
+    auto newData = std::make_shared<FileData>(oldData->directory, oldData->name, std::move(buffer),
+                                              oldData->fullPath);
+
+    // Update lookupCache to point to new data
+    lookupCache.insert_or_assign(getU8Str(newData->fullPath),
+                                 std::pair{newData, std::error_code{}});
+
+    // Create a new FileInfo entry with new data (don't modify old entry!)
+    // Old data should be freed if nothing more points to it.
+    return createBufferEntry(newData, oldInfo->includedFrom, oldInfo->library, oldInfo->sortKey,
+                             lock);
+}
+
+bool SourceManager::isLatestData(BufferID id) const {
+    std::shared_lock<std::shared_mutex> lock(mutex);
+    auto info = getFileInfo(id, lock);
+    if (!info || !info->data)
+        return false;
+    return !info->data->isStale;
+}
+
 template<IsLock TLock>
 SourceManager::FileInfo* SourceManager::getFileInfo(BufferID buffer, TLock&) {
     if (!buffer || buffer.getId() >= bufferEntries.size())
@@ -593,7 +761,8 @@ const SourceManager::FileInfo* SourceManager::getFileInfo(BufferID buffer, TLock
     return std::get_if<FileInfo>(&bufferEntries[buffer.getId()]);
 }
 
-SourceBuffer SourceManager::createBufferEntry(FileData* fd, SourceLocation includedFrom,
+SourceBuffer SourceManager::createBufferEntry(std::shared_ptr<FileData> fd,
+                                              SourceLocation includedFrom,
                                               const SourceLibrary* library, uint64_t sortKey,
                                               std::unique_lock<std::shared_mutex>&) {
     SLANG_ASSERT(fd);
@@ -604,8 +773,9 @@ SourceBuffer SourceManager::createBufferEntry(FileData* fd, SourceLocation inclu
         sortKey = (uint64_t)bufferEntries.size() << 32;
 
     bufferEntries.emplace_back(FileInfo(fd, library, includedFrom, sortKey));
-    return SourceBuffer{std::string_view(fd->mem.data(), fd->mem.size()), library,
-                        BufferID((uint32_t)(bufferEntries.size() - 1), fd->name)};
+    BufferID newBufferId((uint32_t)(bufferEntries.size() - 1), fd->name);
+
+    return SourceBuffer{std::string_view(fd->mem.data(), fd->mem.size()), library, newBufferId};
 }
 
 bool SourceManager::isCached(const fs::path& path) const {
@@ -651,7 +821,7 @@ SourceManager::BufferOrError SourceManager::openCached(const fs::path& fullPath,
                 return nonstd::make_unexpected(ec);
 
             SLANG_ASSERT(fd);
-            return createBufferEntry(fd.get(), includedFrom, library, sortKey, lock);
+            return createBufferEntry(fd, includedFrom, library, sortKey, lock);
         }
     }
 
@@ -684,7 +854,7 @@ SourceBuffer SourceManager::cacheBuffer(fs::path&& path, std::string&& pathStr,
     std::unique_lock<std::shared_mutex> lock(mutex);
 
     auto directory = &*directories.insert(path.parent_path()).first;
-    auto fd = std::make_unique<FileData>(directory, std::move(name), std::move(buffer),
+    auto fd = std::make_shared<FileData>(directory, std::move(name), std::move(buffer),
                                          std::move(path));
 
     // Note: it's possible that insertion here fails due to another thread
@@ -694,23 +864,22 @@ SourceBuffer SourceManager::cacheBuffer(fs::path&& path, std::string&& pathStr,
     // we already loaded (just like we had gotten a hit on the cache in the
     // first place).
     auto [it, inserted] = lookupCache.emplace(pathStr, std::pair{std::move(fd), std::error_code{}});
-
-    FileData* fdPtr = it->second.first.get();
-    return createBufferEntry(fdPtr, includedFrom, library, sortKey, lock);
+    return createBufferEntry(it->second.first, includedFrom, library, sortKey, lock);
 }
 
 template<IsLock TLock>
-size_t SourceManager::getRawLineNumber(SourceLocation location, TLock& readLock) const {
+std::optional<slang::SourceManager::FileData*> SourceManager::computeOffsets(
+    BufferID buffer, TLock& readLock) const {
     FileData* fd;
     {
         // Separate scope so that info isn't used after it may potentially
-        // get invalidated when we briefly unloack a read lock and grab a
+        // get invalidated when we briefly unlock a read lock and grab a
         // write lock below.
-        const FileInfo* info = getFileInfo(location.buffer(), readLock);
+        const FileInfo* info = getFileInfo(buffer, readLock);
         if (!info || !info->data)
-            return 0;
+            return std::nullopt;
 
-        fd = info->data;
+        fd = info->data.get();
     }
 
     if (fd->lineOffsets.empty()) {
@@ -719,11 +888,12 @@ size_t SourceManager::getRawLineNumber(SourceLocation location, TLock& readLock)
         // read lock and grab a write lock.
         if constexpr (std::is_same_v<TLock, std::shared_lock<std::shared_mutex>>) {
             readLock.unlock();
+            {
 
-            std::unique_lock<std::shared_mutex> writeLock(mutex);
-            computeLineOffsets(fd->mem, fd->lineOffsets);
+                std::unique_lock<std::shared_mutex> writeLock(mutex);
+                computeLineOffsets(fd->mem, fd->lineOffsets);
+            }
 
-            writeLock.unlock();
             readLock.lock();
         }
         else {
@@ -731,14 +901,24 @@ size_t SourceManager::getRawLineNumber(SourceLocation location, TLock& readLock)
         }
     }
 
+    return std::optional(fd);
+}
+
+template<IsLock TLock>
+size_t SourceManager::getRawLineNumber(SourceLocation location, TLock& readLock) const {
+    auto fd = computeOffsets(location.buffer(), readLock);
+    if (!fd) {
+        return 0;
+    }
+
     // Find the first line offset that is greater than the given location offset. That iterator
     // then tells us how many lines away from the beginning we are.
-    auto it = std::ranges::lower_bound(fd->lineOffsets, location.offset());
+    auto it = std::ranges::lower_bound((*fd)->lineOffsets, location.offset());
 
     // We want to ensure the line we return is strictly greater than the given location offset.
     // So if it is equal, add one to the lower bound we got.
-    size_t line = size_t(it - fd->lineOffsets.begin());
-    if (it != fd->lineOffsets.end() && *it == location.offset())
+    size_t line = size_t(it - (*fd)->lineOffsets.begin());
+    if (it != (*fd)->lineOffsets.end() && *it == location.offset())
         line++;
     return line;
 }
@@ -797,25 +977,36 @@ SourceLocation SourceManager::getOriginalLocImpl(SourceLocation location, TLock&
     return std::get<ExpansionInfo>(bufferEntries[buffer.getId()]).originalLoc + location.offset();
 }
 
-void SourceManager::computeLineOffsets(const SmallVector<char>& buffer,
-                                       std::vector<size_t>& offsets) noexcept {
+namespace {
+void computeLineOffsetsImpl(const char* start, const char* end,
+                            std::vector<size_t>& offsets) noexcept {
     // first line always starts at offset 0
     offsets.push_back(0);
 
-    const char* ptr = buffer.data();
-    const char* end = buffer.data() + buffer.size();
+    const char* ptr = start;
     while (ptr != end) {
         if (ptr[0] == '\n' || ptr[0] == '\r') {
             // if we see \r\n or \n\r skip both chars
-            if ((ptr[1] == '\n' || ptr[1] == '\r') && ptr[0] != ptr[1])
+            if (ptr + 1 != end && (ptr[1] == '\n' || ptr[1] == '\r') && ptr[0] != ptr[1])
                 ptr++;
             ptr++;
-            offsets.push_back((size_t)(ptr - buffer.data()));
+            offsets.push_back((size_t)(ptr - start));
         }
         else {
             ptr++;
         }
     }
+}
+} // namespace
+
+void SourceManager::computeLineOffsets(const SmallVector<char>& buffer,
+                                       std::vector<size_t>& offsets) noexcept {
+    computeLineOffsetsImpl(buffer.data(), buffer.data() + buffer.size(), offsets);
+}
+
+void SourceManager::computeLineOffsets(std::string_view text,
+                                       std::vector<size_t>& offsets) noexcept {
+    computeLineOffsetsImpl(text.data(), text.data() + text.size(), offsets);
 }
 
 const SourceManager::LineDirectiveInfo* SourceManager::FileInfo::getPreviousLineDirective(
