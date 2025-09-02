@@ -130,9 +130,16 @@ enum class SLANG_EXPORT CompilationFlags {
     AllowLibModuleRedefinition = 1 << 16,
 
     /// Don't instantiate unreferenced modules to perform semantic checking on them.
-    IgnoreUninstantiatedModules = 1 << 17
+    IgnoreUninstantiatedModules = 1 << 17,
+
+    /// Allow tops without set params
+    AllowInvalidTop = 1 << 18,
+
+    /// Instantiate modules and other objects in untaken generate branches
+    //  to allow for more lints, like port and parameter name checks.
+    UntakenGenerateChecks = 1 << 19,
 };
-SLANG_BITMASK(CompilationFlags, IgnoreUninstantiatedModules)
+SLANG_BITMASK(CompilationFlags, UntakenGenerateChecks)
 
 /// Contains various options that can control compilation behavior.
 struct SLANG_EXPORT CompilationOptions {

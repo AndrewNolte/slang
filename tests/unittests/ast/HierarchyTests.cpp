@@ -982,6 +982,21 @@ endmodule
     CHECK(unusedDefs[1]->name == "nottop");
 }
 
+TEST_CASE("Allow invalid top module parameters") {
+    auto tree = SyntaxTree::fromText(R"(
+module top #(parameter int p);
+endmodule
+)");
+
+    CompilationOptions options;
+    options.flags |= CompilationFlags::AllowInvalidTop;
+    options.topModules.emplace("top"sv);
+
+    Compilation compilation(options);
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+}
+
 TEST_CASE("No top warning") {
     auto tree = SyntaxTree::fromText(R"(
 )");
@@ -1478,6 +1493,31 @@ endmodule
     Compilation compilation;
     compilation.addSyntaxTree(tree);
     NO_COMPILATION_ERRORS;
+}
+
+TEST_CASE("Untaken generate checks report bindable errors") {
+    auto tree = SyntaxTree::fromText(R"(
+module child(input logic a);
+endmodule
+
+module top;
+    if (0) begin
+        child child(.missing(1'b1));
+        missing missing();
+    end
+endmodule
+)");
+
+    CompilationOptions options;
+    options.flags |= CompilationFlags::UntakenGenerateChecks;
+
+    Compilation compilation(options);
+    compilation.addSyntaxTree(tree);
+
+    auto diags = compilation.getAllDiagnostics();
+    CHECK(std::ranges::any_of(diags,
+                              [](auto& diag) { return diag.code == diag::PortDoesNotExist; }));
+    CHECK(std::ranges::any_of(diags, [](auto& diag) { return diag.code == diag::UnknownModule; }));
 }
 
 TEST_CASE("Bind directives") {
