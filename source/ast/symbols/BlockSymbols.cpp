@@ -915,10 +915,8 @@ GenerateBlockArraySymbol& GenerateBlockArraySymbol::fromSyntax(Compilation& comp
     if (entries.empty()) {
         createBlock(SVInt(32, 0, true), true);
     }
-    else {
-        for (auto entry : entries)
-            result->addMember(*entry);
-    }
+    for (auto entry : entries)
+        result->addMember(*entry);
 
     return *result;
 }

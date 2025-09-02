@@ -135,9 +135,16 @@ enum class SLANG_EXPORT CompilationFlags {
     /// Allow the legacy `cross_auto_bin_max` coverage option to be set on covergroups
     /// and crosses. This option was part of SystemVerilog 3.1a but is not in IEEE 1800;
     /// some tools still accept it for compatibility with older code.
-    AllowCrossAutoBinMax = 1 << 18
+    AllowCrossAutoBinMax = 1 << 18,
+
+    /// Allow tops without set params
+    AllowInvalidTop = 1 << 19,
+
+    /// Instantiate modules and other objects in untaken generate branches
+    //  to allow for more lints, like port and parameter name checks.
+    UntakenGenerateChecks = 1 << 20,
 };
-SLANG_BITMASK(CompilationFlags, AllowCrossAutoBinMax)
+SLANG_BITMASK(CompilationFlags, UntakenGenerateChecks)
 
 /// Contains various options that can control compilation behavior.
 struct SLANG_EXPORT CompilationOptions {
