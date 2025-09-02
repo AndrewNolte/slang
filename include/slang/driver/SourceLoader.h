@@ -7,15 +7,16 @@
 //------------------------------------------------------------------------------
 #pragma once
 
+#include <concepts>
 #include <deque>
 #include <filesystem>
 #include <memory>
-#include <mutex>
 #include <optional>
 #include <span>
 #include <vector>
 
 #include "slang/syntax/SyntaxFwd.h"
+#include "slang/syntax/SyntaxTree.h"
 #include "slang/text/Glob.h"
 #include "slang/text/SourceLocation.h"
 #include "slang/util/FlatMap.h"
@@ -35,6 +36,12 @@ class SyntaxTree;
 }
 
 namespace slang::driver {
+
+/// Concept for functions that can find source buffers by name
+template<typename F>
+concept BufferFinder = requires(F f, std::string_view name) {
+    { f(name) } -> std::convertible_to<SourceBuffer>;
+};
 
 /// Specifies options used when loading source files.
 struct SLANG_EXPORT SourceOptions {
@@ -152,6 +159,61 @@ public:
     /// it does not exist. Returns nullptr if @a name is empty.
     SourceLibrary* getOrAddLibrary(std::string_view name);
 
+    /// Load trees using a custom buffer finder function (templated with concept constraint)
+    template<BufferFinder FindBufferFunc>
+    static void loadTrees(
+        SyntaxTreeList& syntaxTrees, FindBufferFunc findBufferFunc, SourceManager& sourceManager,
+        const Bag& optionBag = {},
+        std::span<const syntax::DefineDirectiveSyntax* const> inheritedMacros = {}) {
+        // If library directories are specified, see if we have any unknown instantiations
+        // or package names for which we should search for additional source files to load.
+        flat_hash_set<std::string_view> knownNames;
+        auto addKnownNames = [&](const std::shared_ptr<syntax::SyntaxTree>& tree) {
+            auto& meta = tree->getMetadata();
+            meta.visitDeclaredSymbols([&](std::string_view name) { knownNames.emplace(name); });
+        };
+
+        auto findMissingNames = [&](const std::shared_ptr<syntax::SyntaxTree>& tree,
+                                    flat_hash_set<std::string_view>& missing) {
+            auto& meta = tree->getMetadata();
+            meta.visitReferencedSymbols([&](std::string_view name) {
+                if (knownNames.find(name) == knownNames.end())
+                    missing.emplace(name);
+            });
+        };
+
+        for (auto& tree : syntaxTrees)
+            addKnownNames(tree);
+
+        flat_hash_set<std::string_view> missingNames;
+        for (auto& tree : syntaxTrees)
+            findMissingNames(tree, missingNames);
+
+        // Keep loading new files as long as we are making forward progress.
+        flat_hash_set<std::string_view> nextMissingNames;
+        while (true) {
+            for (auto name : missingNames) {
+                auto buffer = findBufferFunc(name);
+
+                if (buffer) {
+                    auto tree = syntax::SyntaxTree::fromBuffer(buffer, sourceManager, optionBag,
+                                                               inheritedMacros);
+                    tree->isLibraryUnit = true;
+                    syntaxTrees.emplace_back(tree);
+
+                    addKnownNames(tree);
+                    findMissingNames(tree, nextMissingNames);
+                }
+            }
+
+            if (nextMissingNames.empty())
+                break;
+
+            missingNames = std::move(nextMissingNames);
+            nextMissingNames = {};
+        }
+    }
+
 private:
     // One entry per unit of files + options to compile them.
     // Only used for addSeparateUnit.
@@ -226,6 +288,9 @@ private:
                             const SourceOptions& srcOptions, uint64_t fileSortKey = UINT64_MAX);
     void addError(const std::filesystem::path& path, std::error_code ec);
 
+    /// Find a source buffer by searching through directories and extensions
+    SourceBuffer findBuffer(std::string_view name);
+
     SourceManager& sourceManager;
 
     std::vector<FileEntry> fileEntries;
@@ -238,6 +303,7 @@ private:
     std::vector<std::string> errors;
     SyntaxTreeList libraryMapTrees;
 
+public:
     static constexpr int MinFilesForThreading = 4;
 };
 
