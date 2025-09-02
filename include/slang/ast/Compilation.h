@@ -127,9 +127,15 @@ enum class SLANG_EXPORT CompilationFlags {
     /// Allow multiple definitions of the same module, interface, program, or primitive at
     /// the root scope within the same library, keeping the first and silently discarding
     /// subsequent ones, but only when the conflicting definition comes from a library file.
-    AllowLibModuleRedefinition = 1 << 16
+    AllowLibModuleRedefinition = 1 << 16,
+    /// Allow tops without set params
+    AllowInvalidTop = 1 << 17,
+
+    /// Instantiate modules and other objects in untaken generate branches
+    //  to allow for more lints, like port and parameter name checks.
+    UntakenGenerateChecks = 1 << 18,
 };
-SLANG_BITMASK(CompilationFlags, AllowLibModuleRedefinition)
+SLANG_BITMASK(CompilationFlags, UntakenGenerateChecks)
 
 /// Contains various options that can control compilation behavior.
 struct SLANG_EXPORT CompilationOptions {
