@@ -553,7 +553,7 @@ bool Preprocessor::expandMacro(MacroDef macro, MacroExpansion& expansion,
         // points into the macro body where the formal argument was used.
         SourceLocation tokenLoc = expansion.adjustLoc(token, expansionLoc, start, expansionRange);
         SourceRange argRange(tokenLoc, tokenLoc + token.rawText().length());
-        SourceLocation argLoc = sourceManager.createExpansionLoc(firstLoc, argRange, true);
+        SourceLocation argLoc = sourceManager.createArgExpansionLoc(firstLoc, argRange);
 
         // See note above about weird macro usage being argument replaced.
         // In that case we want to fabricate the correct directive token here.
@@ -653,7 +653,7 @@ SourceLocation Preprocessor::MacroExpansion::adjustLoc(Token token, SourceLocati
     // the new buffer as its original location.
     if (token.location().buffer() != firstLoc.buffer()) {
         firstLoc = token.location();
-        macroLoc = sourceManager.createExpansionLoc(firstLoc, expansionRange, true);
+        macroLoc = sourceManager.createArgExpansionLoc(firstLoc, expansionRange);
     }
 
     return macroLoc + (token.location() - firstLoc);
