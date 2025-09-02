@@ -229,7 +229,12 @@ const ParameterSymbolBase& ParameterBuilder::createParam(
             }
             else if (param->isPortParam() && !tt.getTypeSyntax() &&
                      (decl.hasSyntax || !decl.givenType)) {
-                reportError(*param);
+                if (useInvalidForMissing) {
+                    tt.setType(comp.getErrorType());
+                }
+                else {
+                    reportError(*param);
+                }
             }
         }
 
@@ -308,7 +313,12 @@ const ParameterSymbolBase& ParameterBuilder::createParam(
                 }
             }
             else if (param->isPortParam() && !declType.getInitializerSyntax()) {
-                reportError(*param);
+                if (useInvalidForMissing) {
+                    param->setValue(comp, nullptr, /* needsCoercion */ false);
+                }
+                else {
+                    reportError(*param);
+                }
             }
         }
 
