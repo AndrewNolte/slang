@@ -114,7 +114,13 @@ enum class SLANG_EXPORT CompilationFlags {
     DisallowRefsToUnknownInstances = 1 << 12,
 
     /// Allow unnamed generate blocks (e.g. genblk) to be referenced
-    AllowUnnamedGenerate = 1 << 13
+    AllowUnnamedGenerate = 1 << 13,
+    /// Allow tops without set params
+    AllowInvalidTop = 1 << 14,
+
+    /// Instantiate modules and other objects in untaken generate branches
+    //  to allow for more lints, like port and parameter name checks.
+    UntakenGenerateChecks = 1 << 15,
 };
 SLANG_BITMASK(CompilationFlags, AllowUnnamedGenerate)
 
