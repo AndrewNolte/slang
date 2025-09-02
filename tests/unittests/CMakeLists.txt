@@ -68,11 +68,23 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
 endif()
 
 # Copy the data directory for running tests from the build folder.
+
+# Define the destination paths using variables.
+# This is a single source of truth for these paths.
+set(TEST_DATA_DEST "${CMAKE_CURRENT_BINARY_DIR}/data")
+
+# Add a single custom command for copying the test data
+# We reference the TEST_DATA_DEST variable here
 add_custom_command(
   TARGET unittests
   POST_BUILD
-  COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/data
-          ${CMAKE_CURRENT_BINARY_DIR}/data)
+  COMMAND ${CMAKE_COMMAND} -E copy_directory
+    ${CMAKE_CURRENT_SOURCE_DIR}/data
+    ${TEST_DATA_DEST}
+)
+
+# Add another custom command for copying the regression data
+# We reference the REGRESSION_DATA_DEST variable here
 add_custom_command(
   TARGET unittests
   POST_BUILD
@@ -82,4 +94,9 @@ add_custom_command(
     ${CMAKE_CURRENT_BINARY_DIR}/../regression)
 
 add_test(NAME unittests COMMAND unittests)
+
+# This defines a C++ macro named TEST_DATA_DIR
+target_compile_definitions(unittests
+    PRIVATE "TEST_DATA_DIR=\"${TEST_DATA_DEST}/\""
+)
 set_tests_properties(unittests PROPERTIES TIMEOUT 60)
