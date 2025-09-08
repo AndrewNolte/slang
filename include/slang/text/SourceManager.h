@@ -148,7 +148,7 @@ public:
 
     std::string_view getText(SourceRange range) const;
 
-    std::string_view getLine(BufferID buffer, uint line) const;
+    std::string_view getLine(BufferID buffer, uint32_t line) const;
 
     /// If the given location is a macro location, fully expands it out to its actual
     /// file expansion location. Otherwise just returns the location itself.
@@ -187,8 +187,8 @@ public:
                               const SourceLibrary* library = nullptr);
 
     /// Read in a source file from disk.
-    virtual BufferOrError readSource(const std::filesystem::path& path,
-                                     const SourceLibrary* library, uint64_t sortKey = UINT64_MAX);
+    BufferOrError readSource(const std::filesystem::path& path, const SourceLibrary* library,
+                             uint64_t sortKey = UINT64_MAX);
 
     /// Read in a header file from disk.
     BufferOrError readHeader(std::string_view path, SourceLocation includedFrom,
