@@ -150,13 +150,14 @@ void registerUtil(py::module_& m) {
         .def("getFullyOriginalRange", &SourceManager::getFullyOriginalRange, "range"_a)
         .def("getFullyExpandedLoc", &SourceManager::getFullyExpandedLoc, "location"_a)
         .def("getSourceText", &SourceManager::getSourceText, "buffer"_a)
-        .def("assignText",
-             py::overload_cast<std::string_view, SourceLocation, const SourceLibrary*>(
-                 &SourceManager::assignText),
-             "text"_a, "includedFrom"_a = SourceLocation(), "library"_a = nullptr)
+        .def(
+            "assignText",
+            static_cast<SourceBuffer(SourceManager::*)(std::string_view, SourceLocation, const SourceLibrary*)>(
+                &SourceManager::assignText),
+            "text"_a, "includedFrom"_a = SourceLocation(), "library"_a = nullptr)
         .def("assignText",
              py::overload_cast<std::string_view, std::string_view, SourceLocation,
-                               const SourceLibrary*>(&SourceManager::assignText),
+                               const SourceLibrary*>(&SourceManager::assignText<false>),
              "path"_a, "text"_a, "includedFrom"_a = SourceLocation(), "library"_a = nullptr)
         .def(
             "readSource",

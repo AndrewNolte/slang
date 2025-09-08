@@ -985,9 +985,4 @@ template SourceBuffer SourceManager::assignText<true>(std::string_view, std::str
 template SourceBuffer SourceManager::assignText<false>(std::string_view, std::string_view,
                                                        SourceLocation, const SourceLibrary*);
 
-template std::optional<SourceManager::FileData*> SourceManager::computeOffsets<
-    std::shared_lock<std::shared_mutex>>(BufferID, std::shared_lock<std::shared_mutex>&) const;
-template std::optional<SourceManager::FileData*> SourceManager::computeOffsets<
-    std::unique_lock<std::shared_mutex>>(BufferID, std::unique_lock<std::shared_mutex>&) const;
-
 } // namespace slang
