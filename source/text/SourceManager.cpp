@@ -163,14 +163,14 @@ std::optional<SourceLocation> SourceManager::getSourceLocation(BufferID buffer,
     return std::optional(slang::SourceLocation(buffer, offset));
 }
 
-std::optional<SourceLocation> SourceManager::getSourceLocation(std::string_view bufferPath,
+std::optional<SourceLocation> SourceManager::getSourceLocation(std::string_view targetPath,
                                                                size_t offset) const {
     std::shared_lock<std::shared_mutex> lock(mutex);
-    fs::path fullPath(fs::absolute(bufferPath));
+    fs::path targetFp(fs::absolute(targetPath));
 
     for (const auto bufferID : getAllBuffers()) {
-        const auto& bufferPath = getFullPath(bufferID);
-        if (fullPath.compare(bufferPath) == 0) {
+        const auto& fp = getFullPath(bufferID);
+        if (targetFp.compare(fp) == 0) {
             auto fd = computeOffsets(bufferID, lock);
             if (!fd) {
                 return std::nullopt;
