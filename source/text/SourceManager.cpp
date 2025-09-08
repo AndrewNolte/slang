@@ -428,14 +428,13 @@ std::string_view SourceManager::getText(SourceRange range) const {
     return std::string_view(fd->mem.data() + start, end - start);
 }
 
-std::string_view SourceManager::getLine(BufferID buffer, uint line) const {
+std::string_view SourceManager::getLine(BufferID buffer, uint32_t line) const {
     std::shared_lock<std::shared_mutex> lock(mutex);
     std::optional<slang::SourceManager::FileData*> fdOpt = computeOffsets(buffer, lock);
     if (!fdOpt) {
         return {};
     }
     auto fd = *fdOpt;
-    SLANG_ASSERT(line >= 0);
     SLANG_ASSERT(line <= fd->lineOffsets.size());
     auto start = line == 0 ? 0 : fd->lineOffsets[line - 1];
     if (line == fd->lineOffsets.size()) {
