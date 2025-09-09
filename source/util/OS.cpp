@@ -406,6 +406,9 @@ std::string OS::parseEnvVar(const char*& ptr, const char* end) {
 int OS::getpid() {
 #if defined(_WIN32)
     return ::_getpid();
+#elif defined(__wasi__)
+    // WASI doesn't have a concept of process IDs
+    return 1;
 #else
     return ::getpid();
 #endif
