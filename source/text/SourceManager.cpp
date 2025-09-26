@@ -985,4 +985,14 @@ template SourceBuffer SourceManager::assignText<true>(std::string_view, std::str
 template SourceBuffer SourceManager::assignText<false>(std::string_view, std::string_view,
                                                        SourceLocation, const SourceLibrary*);
 
+template SourceBuffer SourceManager::assignBuffer<true>(std::string_view bufferPath,
+                                                        SmallVector<char>&& buffer,
+                                                        SourceLocation includedFrom,
+                                                        const SourceLibrary* library);
+
+template SourceBuffer SourceManager::assignBuffer<false>(std::string_view bufferPath,
+                                                         SmallVector<char>&& buffer,
+                                                         SourceLocation includedFrom,
+                                                         const SourceLibrary* library);
+
 } // namespace slang
