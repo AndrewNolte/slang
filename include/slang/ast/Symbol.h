@@ -185,6 +185,8 @@ public:
     /// each parent's name to the provided buffer.
     void appendLexicalPath(std::string& buffer) const;
 
+    std::string getLexicalPath() const;
+
     /// Determines whether this symbol is considered to be declared before the
     /// given symbol, in the same compilation unit. If it is, this method returns true.
     /// Otherwise it returns false. If the given symbol is not even in the same
