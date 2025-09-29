@@ -248,6 +248,12 @@ void Symbol::appendLexicalPath(std::string& buffer) const {
     getLexicalPathImpl(*this, buffer);
 }
 
+std::string Symbol::getLexicalPath() const {
+    std::string buffer;
+    getLexicalPathImpl(*this, buffer);
+    return buffer;
+}
+
 std::optional<bool> Symbol::isDeclaredBefore(const Symbol& target) const {
     return isDeclaredBefore(LookupLocation::after(target));
 }
