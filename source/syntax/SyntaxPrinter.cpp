@@ -118,6 +118,84 @@ SyntaxPrinter& SyntaxPrinter::print(const SyntaxNode& node) {
     return *this;
 }
 
+SyntaxPrinter& SyntaxPrinter::printLeadingComments(const SyntaxNode& node) {
+    // only add comments after seeing a newline
+    // walk back until we print a block comment or hit a double newline
+    auto triviaSpan = node.getFirstToken().trivia();
+    using Iterator = decltype(triviaSpan)::iterator;
+    std::optional<Iterator> lastComment;
+    std::optional<Iterator> docBoundary;
+
+    // walk backwards through the trivia
+    auto findDocBoundary = [&]() {
+        bool last_is_newline = false;
+        for (auto it = triviaSpan.rbegin(); it != triviaSpan.rend(); it++) {
+            const auto& trivia = *it;
+            switch (trivia.kind) {
+                case TriviaKind::EndOfLine:
+                    if (last_is_newline && lastComment) {
+                        return;
+                    }
+                    docBoundary = lastComment;
+                    last_is_newline = true;
+                    break;
+                case TriviaKind::BlockComment:
+                    docBoundary = it.base() - 1;
+                    return;
+                case TriviaKind::LineComment:
+                    lastComment = it.base() - 1;
+                    [[fallthrough]];
+                default:
+                    last_is_newline = false;
+            }
+        }
+    };
+    findDocBoundary();
+    // if we found a boundary, print all the trivia from there to the end
+    if (docBoundary) {
+        for (auto it = *docBoundary; it != triviaSpan.end(); it++) {
+            print(*it);
+        }
+    }
+
+    return *this;
+}
+
+SyntaxPrinter& SyntaxPrinter::printExcludingLeadingTrivia(const SyntaxNode& node) {
+
+    size_t childCount = node.getChildCount();
+    if (childCount == 0)
+        return *this;
+
+    bool seenFirst = false;
+    std::function<void(const SyntaxNode&)> printInternal = [&](const SyntaxNode& n) {
+        for (size_t i = 0; i < n.getChildCount(); i++) {
+            if (auto childNode = n.childNode(i); childNode)
+                printInternal(*childNode);
+            else if (auto token = n.childToken(i); token) {
+                if (!seenFirst) {
+                    includeTrivia = false;
+                    print(token);
+                    includeTrivia = true;
+                    seenFirst = true;
+                }
+                else {
+                    print(token);
+                }
+            }
+        }
+    };
+
+    printInternal(node);
+    return *this;
+}
+
+SyntaxPrinter& SyntaxPrinter::printWithLeadingComments(const SyntaxNode& node) {
+    printLeadingComments(node);
+    printExcludingLeadingTrivia(node);
+    return *this;
+}
+
 SyntaxPrinter& SyntaxPrinter::print(const SyntaxTree& tree) {
     print(tree.root());
     if (tree.root().kind != SyntaxKind::CompilationUnit && tree.getMetadata().eofToken)
