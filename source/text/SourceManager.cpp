@@ -665,7 +665,8 @@ std::vector<BufferID> SourceManager::getAllBuffers() const {
 
 void SourceManager::clearOldBuffers() {
     std::unique_lock<std::shared_mutex> lock(mutex);
-    oldBuffers.clear();
+    oldBufferData.clear();
+    // Note: fileDataToBuffers is already cleaned up when buffers are invalidated
 }
 
 template<IsLock TLock>
@@ -695,8 +696,12 @@ SourceBuffer SourceManager::createBufferEntry(FileData* fd, SourceLocation inclu
         sortKey = (uint64_t)bufferEntries.size() << 32;
 
     bufferEntries.emplace_back(FileInfo(fd, library, includedFrom, sortKey));
-    return SourceBuffer{std::string_view(fd->mem.data(), fd->mem.size()), library,
-                        BufferID((uint32_t)(bufferEntries.size() - 1), fd->name)};
+    BufferID newBufferId((uint32_t)(bufferEntries.size() - 1), fd->name);
+
+    // Update reverse index: track which BufferIDs point to this FileData
+    fileDataToBuffers[fd].push_back(newBufferId);
+
+    return SourceBuffer{std::string_view(fd->mem.data(), fd->mem.size()), library, newBufferId};
 }
 
 bool SourceManager::isCached(const fs::path& path) const {
@@ -787,16 +792,24 @@ SourceBuffer SourceManager::cacheBuffer(fs::path&& path, std::string&& pathStr,
     // first place).
     if constexpr (UPDATE) {
         auto it = lookupCache.find(pathStr);
-        if (it != lookupCache.end() && it->second.first) {
-            // Find the BufferID associated with this file data and move it to oldBuffers
-            for (size_t i = 1; i < bufferEntries.size(); i++) {
-                if (auto* fileInfo = std::get_if<FileInfo>(&bufferEntries[i])) {
-                    if (fileInfo->data == it->second.first.get()) {
-                        BufferID bufferId(static_cast<uint32_t>(i), ""sv);
-                        oldBuffers[bufferId] = std::move(it->second.first);
-                        break;
+        if (it != lookupCache.end()) {
+            auto& [existingFd, ec] = it->second;
+            if (!ec && existingFd) {
+                FileData* oldDataPtr = existingFd.get();
+
+                // Use reverse index to find all BufferIDs pointing to this FileData (O(1) lookup)
+                auto bufferIt = fileDataToBuffers.find(oldDataPtr);
+                if (bufferIt != fileDataToBuffers.end()) {
+                    // Mark all associated BufferIDs as invalid
+                    for (const auto& bufferId : bufferIt->second) {
+                        invalidBufferIDs.insert(bufferId);
                     }
+                    // Remove from reverse index
+                    fileDataToBuffers.erase(bufferIt);
                 }
+
+                // Move the old FileData to the vector for ownership
+                oldBufferData.push_back(std::move(existingFd));
             }
         }
 

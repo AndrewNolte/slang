@@ -258,7 +258,7 @@ public:
     /// Clears any old buffer data
     void clearOldBuffers();
 
-    bool isValid(BufferID id) const { return oldBuffers.find(id) == oldBuffers.end(); };
+    bool isValid(BufferID id) const { return invalidBufferIDs.find(id) == invalidBufferIDs.end(); };
 
     // Instead of a file, this lets a BufferID point to a macro expansion location.
     // This is actually used two different ways:
@@ -361,8 +361,17 @@ protected:
     // cache for file lookups; this holds on to the actual file data
     flat_hash_map<std::string, std::pair<std::unique_ptr<FileData>, std::error_code>> lookupCache;
 
-    // map of old buffers that have been replaced, keyed by BufferID
-    flat_hash_map<BufferID, std::unique_ptr<FileData>> oldBuffers;
+    // Set of BufferIDs that have been invalidated due to file updates
+    flat_hash_set<BufferID> invalidBufferIDs;
+
+    // Vector of old FileData that has been replaced (keeps ownership)
+    // Kept around so that symbol names in full Compilations can still access them, but
+    // opening should be done through a shallow compilation that is more up to date.
+    std::vector<std::unique_ptr<FileData>> oldBufferData;
+
+    // Reverse index: maps FileData* to the BufferIDs that reference it
+    // Allows O(1) lookup when invalidating buffers instead of O(n) linear search
+    flat_hash_map<FileData*, SmallVector<BufferID, 4>> fileDataToBuffers;
 
     // directories for system and user includes
     std::vector<std::filesystem::path> systemDirectories;
