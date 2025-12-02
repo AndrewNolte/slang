@@ -239,6 +239,8 @@ public:
     /// Set to true if the generic class is an interface class.
     bool isInterface = false;
 
+    SmallVector<DefinitionSymbol::ParameterDecl, 8> paramDecls;
+
     GenericClassDefSymbol(std::string_view name, SourceLocation loc) :
         Symbol(SymbolKind::GenericClassDef, name, loc) {}
     GenericClassDefSymbol(std::string_view name, SourceLocation loc,
@@ -289,8 +291,6 @@ private:
     const Type* getSpecializationImpl(const ASTContext& context, SourceLocation instanceLoc,
                                       bool forceInvalidParams,
                                       const syntax::ParameterValueAssignmentSyntax* syntax) const;
-
-    SmallVector<DefinitionSymbol::ParameterDecl, 8> paramDecls;
 
     using SpecMap = flat_hash_map<detail::ClassSpecializationKey, const Type*,
                                   detail::ClassSpecializationHasher>;
