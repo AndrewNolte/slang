@@ -959,8 +959,12 @@ InstanceBodySymbol& InstanceBodySymbol::fromDefinition(
     ParameterBuilder paramBuilder(*definition.getParentScope(), definition.name,
                                   definition.parameters);
 
-    paramBuilder.setForceInvalidValues(flags.has(InstanceFlags::Uninstantiated) ||
-                                       compilation.hasFlag(CompilationFlags::AllGenerateBranches));
+    paramBuilder.setForceInvalidValues(flags.has(InstanceFlags::Uninstantiated));
+
+    // TODO: want to only suppress for top level
+    if (compilation.hasFlag(CompilationFlags::AllGenerateBranches)) {
+        paramBuilder.setSuppressErrors(true);
+    }
     if (hierarchyOverrideNode)
         paramBuilder.setOverrides(hierarchyOverrideNode);
 
