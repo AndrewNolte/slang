@@ -490,7 +490,6 @@ SourceBuffer SourceManager::assignText(std::string_view text, SourceLocation inc
     return assignText("", text, includedFrom, library);
 }
 
-template<bool UPDATE>
 SourceBuffer SourceManager::assignText(std::string_view path, std::string_view text,
                                        SourceLocation includedFrom, const SourceLibrary* library) {
     std::string temp;
@@ -505,10 +504,9 @@ SourceBuffer SourceManager::assignText(std::string_view path, std::string_view t
     if (buffer.empty() || buffer.back() != '\0')
         buffer.push_back('\0');
 
-    return assignBuffer<UPDATE>(path, std::move(buffer), includedFrom, library);
+    return assignBuffer(path, std::move(buffer), includedFrom, library);
 }
 
-template<bool UPDATE>
 SourceBuffer SourceManager::assignBuffer(std::string_view bufferPath, SmallVector<char>&& buffer,
                                          SourceLocation includedFrom,
                                          const SourceLibrary* library) {
@@ -517,18 +515,15 @@ SourceBuffer SourceManager::assignBuffer(std::string_view bufferPath, SmallVecto
     auto pathStr = getU8Str(path);
     {
         std::shared_lock<std::shared_mutex> lock(mutex);
-
-        if constexpr (!UPDATE) {
-            auto it = lookupCache.find(pathStr);
-            if (it != lookupCache.end()) {
-                SLANG_THROW(std::runtime_error(
-                    "Buffer with the given path has already been assigned to the source manager"));
-            }
+        auto it = lookupCache.find(pathStr);
+        if (it != lookupCache.end()) {
+            SLANG_THROW(std::runtime_error(
+                "Buffer with the given path has already been assigned to the source manager"));
         }
     }
 
-    return cacheBuffer<UPDATE>(std::move(path), std::move(pathStr), includedFrom, library,
-                               UINT64_MAX, std::move(buffer));
+    return cacheBuffer(std::move(path), std::move(pathStr), includedFrom, library, UINT64_MAX,
+                       std::move(buffer));
 }
 
 SourceManager::BufferOrError SourceManager::readSource(const fs::path& path,
@@ -663,10 +658,51 @@ std::vector<BufferID> SourceManager::getAllBuffers() const {
     return result;
 }
 
-void SourceManager::clearOldBuffers() {
+std::vector<std::shared_ptr<void>> SourceManager::retainBuffers(
+    std::span<const BufferID> ids) const {
+    std::shared_lock<std::shared_mutex> lock(mutex);
+    std::vector<std::shared_ptr<void>> result;
+    result.reserve(ids.size());
+    for (auto id : ids) {
+        auto info = getFileInfo(id, lock);
+        if (info && info->data)
+            result.push_back(info->data);
+    }
+    return result;
+}
+
+SourceBuffer SourceManager::replaceBuffer(BufferID id, SmallVector<char>&& buffer) {
     std::unique_lock<std::shared_mutex> lock(mutex);
-    oldBufferData.clear();
-    // Note: fileDataToBuffers is already cleaned up when buffers are invalidated
+
+    auto oldInfo = getFileInfo(id, lock);
+    SLANG_ASSERT(oldInfo && oldInfo->data);
+
+    auto oldData = oldInfo->data;
+
+    // Mark old data as stale, remove reference
+    oldInfo->data.reset();
+    oldData->isStale = true;
+
+    // Create new FileData with the new buffer content
+    auto newData = std::make_shared<FileData>(oldData->directory, oldData->name, std::move(buffer),
+                                              oldData->fullPath);
+
+    // Update lookupCache to point to new data
+    lookupCache.insert_or_assign(getU8Str(newData->fullPath),
+                                 std::pair{newData, std::error_code{}});
+
+    // Create a new FileInfo entry with new data (don't modify old entry!)
+    // Old data should be freed if nothing more points to it.
+    return createBufferEntry(newData, oldInfo->includedFrom, oldInfo->library, oldInfo->sortKey,
+                             lock);
+}
+
+bool SourceManager::isLatestData(BufferID id) const {
+    std::shared_lock<std::shared_mutex> lock(mutex);
+    auto info = getFileInfo(id, lock);
+    if (!info || !info->data)
+        return false;
+    return !info->data->isStale;
 }
 
 template<IsLock TLock>
@@ -685,7 +721,8 @@ const SourceManager::FileInfo* SourceManager::getFileInfo(BufferID buffer, TLock
     return std::get_if<FileInfo>(&bufferEntries[buffer.getId()]);
 }
 
-SourceBuffer SourceManager::createBufferEntry(FileData* fd, SourceLocation includedFrom,
+SourceBuffer SourceManager::createBufferEntry(std::shared_ptr<FileData> fd,
+                                              SourceLocation includedFrom,
                                               const SourceLibrary* library, uint64_t sortKey,
                                               std::unique_lock<std::shared_mutex>&) {
     SLANG_ASSERT(fd);
@@ -697,9 +734,6 @@ SourceBuffer SourceManager::createBufferEntry(FileData* fd, SourceLocation inclu
 
     bufferEntries.emplace_back(FileInfo(fd, library, includedFrom, sortKey));
     BufferID newBufferId((uint32_t)(bufferEntries.size() - 1), fd->name);
-
-    // Update reverse index: track which BufferIDs point to this FileData
-    fileDataToBuffers[fd].push_back(newBufferId);
 
     return SourceBuffer{std::string_view(fd->mem.data(), fd->mem.size()), library, newBufferId};
 }
@@ -747,7 +781,7 @@ SourceManager::BufferOrError SourceManager::openCached(const fs::path& fullPath,
                 return nonstd::make_unexpected(ec);
 
             SLANG_ASSERT(fd);
-            return createBufferEntry(fd.get(), includedFrom, library, sortKey, lock);
+            return createBufferEntry(fd, includedFrom, library, sortKey, lock);
         }
     }
 
@@ -763,7 +797,6 @@ SourceManager::BufferOrError SourceManager::openCached(const fs::path& fullPath,
                        std::move(buffer));
 }
 
-template<bool UPDATE>
 SourceBuffer SourceManager::cacheBuffer(fs::path&& path, std::string&& pathStr,
                                         SourceLocation includedFrom, const SourceLibrary* library,
                                         uint64_t sortKey, SmallVector<char>&& buffer) {
@@ -781,7 +814,7 @@ SourceBuffer SourceManager::cacheBuffer(fs::path&& path, std::string&& pathStr,
     std::unique_lock<std::shared_mutex> lock(mutex);
 
     auto directory = &*directories.insert(path.parent_path()).first;
-    auto fd = std::make_unique<FileData>(directory, std::move(name), std::move(buffer),
+    auto fd = std::make_shared<FileData>(directory, std::move(name), std::move(buffer),
                                          std::move(path));
 
     // Note: it's possible that insertion here fails due to another thread
@@ -790,40 +823,8 @@ SourceBuffer SourceManager::cacheBuffer(fs::path&& path, std::string&& pathStr,
     // during the read. It's not actually a problem, we'll just use the data
     // we already loaded (just like we had gotten a hit on the cache in the
     // first place).
-    if constexpr (UPDATE) {
-        auto it = lookupCache.find(pathStr);
-        if (it != lookupCache.end()) {
-            auto& [existingFd, ec] = it->second;
-            if (!ec && existingFd) {
-                FileData* oldDataPtr = existingFd.get();
-
-                // Use reverse index to find all BufferIDs pointing to this FileData (O(1) lookup)
-                auto bufferIt = fileDataToBuffers.find(oldDataPtr);
-                if (bufferIt != fileDataToBuffers.end()) {
-                    // Mark all associated BufferIDs as invalid
-                    for (const auto& bufferId : bufferIt->second) {
-                        invalidBufferIDs.insert(bufferId);
-                    }
-                    // Remove from reverse index
-                    fileDataToBuffers.erase(bufferIt);
-                }
-
-                // Move the old FileData to the vector for ownership
-                oldBufferData.push_back(std::move(existingFd));
-            }
-        }
-
-        auto [iter, inserted] = lookupCache.insert_or_assign(pathStr, std::pair{std::move(fd),
-                                                                                std::error_code{}});
-        FileData* fdPtr = iter->second.first.get();
-        return createBufferEntry(fdPtr, includedFrom, library, sortKey, lock);
-    }
-    else {
-        auto [it, inserted] = lookupCache.emplace(pathStr,
-                                                  std::pair{std::move(fd), std::error_code{}});
-        FileData* fdPtr = it->second.first.get();
-        return createBufferEntry(fdPtr, includedFrom, library, sortKey, lock);
-    }
+    auto [it, inserted] = lookupCache.emplace(pathStr, std::pair{std::move(fd), std::error_code{}});
+    return createBufferEntry(it->second.first, includedFrom, library, sortKey, lock);
 }
 
 template<IsLock TLock>
@@ -838,7 +839,7 @@ std::optional<slang::SourceManager::FileData*> SourceManager::computeOffsets(
         if (!info || !info->data)
             return std::nullopt;
 
-        fd = info->data;
+        fd = info->data.get();
     }
 
     if (fd->lineOffsets.empty()) {
@@ -994,20 +995,5 @@ const SourceManager::LineDirectiveInfo* SourceManager::FileInfo::getPreviousLine
         return &*(it - 1);
     }
 }
-
-template SourceBuffer SourceManager::assignText<true>(std::string_view, std::string_view,
-                                                      SourceLocation, const SourceLibrary*);
-template SourceBuffer SourceManager::assignText<false>(std::string_view, std::string_view,
-                                                       SourceLocation, const SourceLibrary*);
-
-template SourceBuffer SourceManager::assignBuffer<true>(std::string_view bufferPath,
-                                                        SmallVector<char>&& buffer,
-                                                        SourceLocation includedFrom,
-                                                        const SourceLibrary* library);
-
-template SourceBuffer SourceManager::assignBuffer<false>(std::string_view bufferPath,
-                                                         SmallVector<char>&& buffer,
-                                                         SourceLocation includedFrom,
-                                                         const SourceLibrary* library);
 
 } // namespace slang

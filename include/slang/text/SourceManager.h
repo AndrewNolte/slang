@@ -174,14 +174,12 @@ public:
 
     /// Instead of loading source from a file, copy it from text already in memory.
     /// Pretend it came from a file located at @a path.
-    template<bool UPDATE = false>
     SourceBuffer assignText(std::string_view path, std::string_view text,
                             SourceLocation includedFrom = SourceLocation(),
                             const SourceLibrary* library = nullptr);
 
     /// Instead of loading source from a file, move it from text already in memory.
     /// Pretend it came from a file located at @a path.
-    template<bool UPDATE = false>
     SourceBuffer assignBuffer(std::string_view path, SmallVector<char>&& buffer,
                               SourceLocation includedFrom = SourceLocation(),
                               const SourceLibrary* library = nullptr);
@@ -255,10 +253,18 @@ public:
     /// source manager.
     std::vector<BufferID> getAllBuffers() const;
 
-    /// Clears any old buffer data
-    void clearOldBuffers();
+    /// Returns opaque handles that keep the buffer data alive.
+    /// Use this to retain buffer data for a compilation that needs to keep this data alive.
+    std::vector<std::shared_ptr<void>> retainBuffers(std::span<const BufferID> ids) const;
 
-    bool isValid(BufferID id) const { return invalidBufferIDs.find(id) == invalidBufferIDs.end(); };
+    /// Replaces the buffer data for an existing BufferID with new content.
+    /// Creates a new FileInfo entry with new data and returns a new BufferID.
+    /// The old BufferID continues to point to the old (now stale) data, which will
+    /// be freed once no other references exist.
+    SourceBuffer replaceBuffer(BufferID id, SmallVector<char>&& buffer);
+
+    /// Determines whether the given BufferID points to non-stale data.
+    bool isLatestData(BufferID id) const;
 
     // Instead of a file, this lets a BufferID point to a macro expansion location.
     // This is actually used two different ways:
@@ -287,7 +293,7 @@ public:
 
         std::string_view macroName;
 
-        ExpansionInfo() {}
+        ExpansionInfo() = default;
         ExpansionInfo(SourceLocation originalLoc, SourceRange expansionRange, bool isMacroArg) :
             originalLoc(originalLoc), expansionRange(expansionRange), isMacroArg(isMacroArg) {}
 
@@ -322,6 +328,7 @@ protected:
         std::vector<size_t> lineOffsets;              // cache of compute line offsets
         const std::filesystem::path* const directory; // directory in which the file exists
         const std::filesystem::path fullPath;         // full path to the file
+        bool isStale = false; // Is pointing at stale data (path has newer contents elsewhere)
 
         FileData(const std::filesystem::path* directory, std::string name, SmallVector<char>&& data,
                  std::filesystem::path fullPath) :
@@ -332,16 +339,16 @@ protected:
     // Stores a pointer to file data along with information about where we included it.
     // There can potentially be many of these for a given file.
     struct FileInfo {
-        FileData* data = nullptr;
+        std::shared_ptr<FileData> data;
         const SourceLibrary* library = nullptr;
         SourceLocation includedFrom;
         uint64_t sortKey = 0;
         std::vector<LineDirectiveInfo> lineDirectives;
 
-        FileInfo() {}
-        FileInfo(FileData* data, const SourceLibrary* library, SourceLocation includedFrom,
-                 uint64_t sortKey) :
-            data(data), library(library), includedFrom(includedFrom), sortKey(sortKey) {}
+        FileInfo() = default;
+        FileInfo(std::shared_ptr<FileData> data, const SourceLibrary* library,
+                 SourceLocation includedFrom, uint64_t sortKey) :
+            data(std::move(data)), library(library), includedFrom(includedFrom), sortKey(sortKey) {}
 
         // Returns a pointer to the LineDirectiveInfo for the nearest enclosing
         // line directive of the given raw line number, or nullptr if there is none
@@ -359,20 +366,7 @@ protected:
     std::vector<std::variant<FileInfo, ExpansionInfo>> bufferEntries;
 
     // cache for file lookups; this holds on to the actual file data
-    flat_hash_map<std::string, std::pair<std::unique_ptr<FileData>, std::error_code>> lookupCache;
-
-    // Set of BufferIDs that have been invalidated due to file updates
-    flat_hash_set<BufferID> invalidBufferIDs;
-
-    // Vector of old FileData that has been replaced (keeps ownership)
-    // Kept around so that symbol names in full Compilations can still access them, but
-    // opening should be done through a shallow compilation that is more up to date.
-    std::vector<std::unique_ptr<FileData>> oldBufferData;
-
-    // Reverse index: maps FileData* to the BufferIDs that reference it
-    // Allows O(1) lookup when invalidating buffers instead of O(n) linear search
-    flat_hash_map<FileData*, SmallVector<BufferID, 4>> fileDataToBuffers;
-
+    flat_hash_map<std::string, std::pair<std::shared_ptr<FileData>, std::error_code>> lookupCache;
     // directories for system and user includes
     std::vector<std::filesystem::path> systemDirectories;
     std::vector<std::filesystem::path> userDirectories;
@@ -399,14 +393,13 @@ protected:
     template<IsLock TLock>
     const FileInfo* getFileInfo(BufferID buffer, TLock& lock) const;
 
-    SourceBuffer createBufferEntry(FileData* fd, SourceLocation includedFrom,
+    SourceBuffer createBufferEntry(std::shared_ptr<FileData> fd, SourceLocation includedFrom,
                                    const SourceLibrary* library, uint64_t sortKey,
                                    std::unique_lock<std::shared_mutex>& lock);
 
     BufferOrError openCached(const std::filesystem::path& fullPath, SourceLocation includedFrom,
                              const SourceLibrary* library, uint64_t sortKey = UINT64_MAX);
 
-    template<bool UPDATE = false>
     SourceBuffer cacheBuffer(std::filesystem::path&& path, std::string&& pathStr,
                              SourceLocation includedFrom, const SourceLibrary* library,
                              uint64_t sortKey, SmallVector<char>&& buffer);
