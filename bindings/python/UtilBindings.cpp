@@ -185,7 +185,7 @@ void registerUtil(py::module_& m) {
             "text"_a, "includedFrom"_a = SourceLocation(), "library"_a = nullptr)
         .def("assignText",
              py::overload_cast<std::string_view, std::string_view, SourceLocation,
-                               const SourceLibrary*>(&SourceManager::assignText<false>),
+                               const SourceLibrary*>(&SourceManager::assignText),
              "path"_a, "text"_a, "includedFrom"_a = SourceLocation(), "library"_a = nullptr)
         .def(
             "readSource",
