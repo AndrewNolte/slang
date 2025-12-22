@@ -8,6 +8,7 @@
 //------------------------------------------------------------------------------
 #pragma once
 
+#include "slang/analysis/AnalysisOptions.h"
 #include "slang/ast/Compilation.h"
 #include "slang/diagnostics/DiagnosticClient.h"
 #include "slang/diagnostics/DiagnosticEngine.h"
@@ -429,6 +430,9 @@ public:
 
     /// Prints a note to stderr with appropriate terminal colors.
     void printNote(const std::string& message);
+
+    /// Adds analysis options to the given bag.
+    analysis::AnalysisOptions getAnalysisOptions() const;
 
 private:
     bool parseUnitListing(std::string_view text);
