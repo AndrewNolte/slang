@@ -578,9 +578,7 @@ endmodule
     compilation.addSyntaxTree(tree);
 
     auto& diags = compilation.getAllDiagnostics();
-    REQUIRE(diags.size() == 2);
-    CHECK(diags[0].code == diag::InvalidModportAccess);
-    CHECK(diags[1].code == diag::ParamHasNoValue);
+    REQUIRE(diags.size() == 0);
 }
 
 TEST_CASE("Interface-based typedef") {
