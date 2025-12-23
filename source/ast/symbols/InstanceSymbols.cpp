@@ -968,8 +968,14 @@ InstanceBodySymbol& InstanceBodySymbol::fromDefinition(
     ParameterBuilder paramBuilder(*definition.getParentScope(), definition.name,
                                   definition.parameters);
 
-    paramBuilder.setForceInvalidValues(flags.has(InstanceFlags::Uninstantiated) ||
-                                       compilation.hasFlag(CompilationFlags::AllGenerateBranches));
+    if (flags.has(InstanceFlags::Uninstantiated)) {
+        paramBuilder.setForceInvalidValues(true);
+    }
+    else if (compilation.hasFlag(CompilationFlags::AllowInvalidTop) &&
+             instanceLoc == definition.location) {
+        paramBuilder.setUseInvalidForMissing(true);
+    }
+
     if (hierarchyOverrideNode)
         paramBuilder.setOverrides(hierarchyOverrideNode);
 
