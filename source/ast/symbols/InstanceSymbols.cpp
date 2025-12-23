@@ -369,13 +369,12 @@ InstanceSymbol::InstanceSymbol(Compilation& compilation, std::string_view name, 
 InstanceSymbol& InstanceSymbol::createDefault(Compilation& comp, const DefinitionSymbol& definition,
                                               const HierarchyOverrideNode* hierarchyOverrideNode,
                                               const ConfigBlockSymbol* configBlock,
-                                              const ConfigRule* configRule,
-                                              SourceLocation locationOverride) {
-    auto loc = locationOverride ? locationOverride : definition.location;
+                                              const ConfigRule* configRule) {
     auto& result = *comp.emplace<InstanceSymbol>(
-        definition.name, loc,
-        InstanceBodySymbol::fromDefinition(comp, definition, loc, InstanceFlags::None,
-                                           hierarchyOverrideNode, configBlock, configRule));
+        definition.name, definition.location,
+        InstanceBodySymbol::fromDefinition(comp, definition, definition.location,
+                                           InstanceFlags::None, hierarchyOverrideNode, configBlock,
+                                           configRule));
 
     if (configBlock) {
         auto rc = comp.emplace<ResolvedConfig>(*configBlock, result);
@@ -856,8 +855,14 @@ static Symbol* recurseDefaultIfaceInst(Compilation& comp, const InterfacePortSym
                                        std::span<const ConstantRange>::iterator it,
                                        std::span<const ConstantRange>::iterator end) {
     if (it == end) {
-        auto& result = InstanceSymbol::createDefault(comp, *port.interfaceDef, nullptr, nullptr,
-                                                     nullptr, port.location);
+        auto& def = *port.interfaceDef;
+        ParameterBuilder paramBuilder(*def.getParentScope(), def.name, def.parameters);
+        paramBuilder.setUseInvalidForMissing(true);
+        // TODO: set parameters based on $static_assert constraints.
+        auto& body = InstanceBodySymbol::fromDefinition(comp, def, port.location, paramBuilder,
+                                                        InstanceFlags::None);
+
+        auto& result = *comp.emplace<InstanceSymbol>(port.name, port.location, body);
 
         if (!firstInst)
             firstInst = &result;
