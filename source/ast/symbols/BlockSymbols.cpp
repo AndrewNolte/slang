@@ -481,9 +481,6 @@ static void createCondGenBlock(Compilation& compilation, const SyntaxNode& synta
     // begin-end keywords, then this generate block is not treated as a separate scope. The
     // generate construct within this block is said to be directly nested. The generate blocks
     // of the directly nested construct are treated as if they belong to the outer construct.
-    if (compilation.hasFlag((CompilationFlags::AllGenerateBranches))) {
-        isUninstantiated = false;
-    }
     switch (syntax.kind) {
         case SyntaxKind::IfGenerate:
             GenerateBlockSymbol::fromSyntax(compilation, syntax.as<IfGenerateSyntax>(), context,
@@ -876,13 +873,7 @@ GenerateBlockArraySymbol& GenerateBlockArraySymbol::fromSyntax(Compilation& comp
 
     result->entries = entries.copy(comp);
     if (entries.empty()) {
-        if (comp.hasFlag((CompilationFlags::AllGenerateBranches))) {
-            createBlock(SVInt(32, 0, true), false);
-            result->addMember(*entries[0]);
-        }
-        else {
-            createBlock(SVInt(32, 0, true), true);
-        }
+        createBlock(SVInt(32, 0, true), true);
     }
     else {
         for (auto entry : entries)

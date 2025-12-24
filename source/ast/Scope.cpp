@@ -726,10 +726,7 @@ void Scope::handleNameConflict(const Symbol& member, const Symbol*& existing) co
         auto& gen1 = existing->as<GenerateBlockSymbol>();
         auto& gen2 = member.as<GenerateBlockSymbol>();
         if (gen1.constructIndex == gen2.constructIndex) {
-            if (!getCompilation().hasFlag(CompilationFlags::AllGenerateBranches)) {
-                SLANG_ASSERT(gen1.isUninstantiated || gen2.isUninstantiated);
-            }
-
+            SLANG_ASSERT(gen1.isUninstantiated || gen2.isUninstantiated);
             if (gen1.isUninstantiated)
                 existing = &member;
             return;
@@ -1197,10 +1194,7 @@ void Scope::elaborate() const {
             symbol->name = std::string_view(span.data(), span.size());
 
             auto [it, inserted] = nameMap->emplace(symbol->name, symbol);
-            (void)it;
-            // TODO: having issues with the AllGenerates flag
-            // SLANG_ASSERT(inserted);
-            (void)inserted;
+            SLANG_ASSERT(inserted);
         };
 
         if (auto block = symbol->as_if<GenerateBlockSymbol>())
