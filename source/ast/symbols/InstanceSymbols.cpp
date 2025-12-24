@@ -512,7 +512,8 @@ void InstanceSymbol::fromSyntax(Compilation& comp, const HierarchyInstantiationS
 
     // If this instance is not instantiated then we'll just fill in a placeholder
     // and move on. This is likely inside an untaken generate branch.
-    if (flags.has(InstanceFlags::Uninstantiated)) {
+    if (flags.has(InstanceFlags::Uninstantiated) &&
+        !comp.hasFlag(CompilationFlags::UntakenGenerateChecks)) {
         UninstantiatedDefSymbol::fromSyntax(comp, syntax, context, results, implicitNets);
         return;
     }
