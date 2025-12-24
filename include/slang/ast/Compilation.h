@@ -114,15 +114,8 @@ enum class SLANG_EXPORT CompilationFlags {
 
     /// Allow unnamed generate blocks (e.g. genblk) to be referenced
     AllowUnnamedGenerate = 1 << 13,
-
-    /// Elaborate all generate blocks for language server use cases
-    /// This disabled multiple driver checking, and allows for
-    /// lookups / name checks of all branches
-    /// to be visited.
-    AllGenerateBranches = 1 << 14,
-
     /// Allow tops without set params
-    AllowInvalidTop = 1 << 15,
+    AllowInvalidTop = 1 << 14,
 };
 SLANG_BITMASK(CompilationFlags, AllowUnnamedGenerate)
 
