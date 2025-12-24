@@ -1662,7 +1662,7 @@ Diagnostic& Compilation::addDiag(Diagnostic diag) {
     SLANG_ASSERT(diag.symbol);
     SLANG_ASSERT(diag.location);
 
-    if (!diag.symbol->isInstantiated()) {
+    if (!diag.symbol->isInstantiated() && !hasFlag(CompilationFlags::UntakenGenerateChecks)) {
         tempDiag = std::move(diag);
         return tempDiag;
     }
@@ -2676,7 +2676,8 @@ std::pair<Compilation::DefinitionLookupResult, bool> Compilation::resolveConfigR
 
 Diagnostic* Compilation::errorMissingDef(std::string_view name, const Scope& scope,
                                          SourceRange sourceRange, DiagCode code) const {
-    if (hasFlag(CompilationFlags::IgnoreUnknownModules) || scope.isUninstantiated() || name.empty())
+    if (hasFlag(CompilationFlags::IgnoreUnknownModules) || name.empty() ||
+        (scope.isUninstantiated() && !hasFlag(CompilationFlags::UntakenGenerateChecks)))
         return nullptr;
 
     if (auto def = getExternDefinition(name, scope)) {
