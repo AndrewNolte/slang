@@ -137,7 +137,7 @@ std::string_view SemanticFacts::getProcedureKindStr(ProceduralBlockKind kind) {
         case ProceduralBlockKind::AlwaysFF:
             return "always_ff"sv;
     }
-    SLANG_UNREACHABLE;
+    return "other"sv;
 }
 
 std::string_view SemanticFacts::getCaseConditionStr(CaseStatementCondition kind) {
