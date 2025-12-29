@@ -74,6 +74,9 @@ public:
 
     /// Issues a new diagnostic.
     Diagnostic& addDiag(const ast::Symbol& symbol, DiagCode code, SourceRange sourceRange);
+
+    /// Issues a new diagnostic.
+    Diagnostic& addDiag(const ast::Symbol& symbol, DiagCode code);
 };
 
 /// The analysis manager coordinates running various analyses on AST symbols.
@@ -83,6 +86,8 @@ public:
 /// be run to check for various issues or extract information.
 class SLANG_EXPORT AnalysisManager {
 public:
+    const SourceManager* sourceManager = nullptr;
+
     /// Default constructor for the analysis manager.
     explicit AnalysisManager(AnalysisOptions options = {});
 
@@ -230,8 +235,6 @@ private:
     std::vector<std::function<void(const AnalyzedProcedure&)>> procListeners;
     std::vector<std::function<void(const AnalyzedScope&)>> scopeListeners;
     std::vector<std::function<void(const AnalyzedAssertion&)>> assertListeners;
-
-    const SourceManager* sourceManager = nullptr;
 
 #if defined(SLANG_USE_THREADS)
     BS::thread_pool<> threadPool;

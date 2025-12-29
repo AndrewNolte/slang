@@ -7,6 +7,7 @@
 //------------------------------------------------------------------------------
 #pragma once
 
+#include "slang/analysis/AnalysisManager.h"
 #include "slang/ast/ASTVisitor.h"
 #include "slang/ast/EvalContext.h"
 #include "slang/diagnostics/AnalysisDiags.h"
@@ -414,7 +415,7 @@ private:
 
     void addDiag(const Symbol& symbol, DiagCode code) {
         if (shouldWarn(symbol))
-            context.addDiag(symbol, code, symbol.location) << symbol.name;
+            context.addDiag(symbol, code) << symbol.name;
     }
 
     std::pair<bool, bool> isReferenced(const syntax::SyntaxNode& node) const {
