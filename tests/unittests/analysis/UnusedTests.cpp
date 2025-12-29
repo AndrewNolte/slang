@@ -313,6 +313,21 @@ endmodule
     CHECK(diags[0].isError());
 }
 
+TEST_CASE("Unused diagnostics cover the symbol name") {
+    auto& text = R"(
+module m;
+    int unused_name;
+endmodule
+)";
+
+    Compilation compilation;
+    auto diags = analyze(text, compilation);
+    REQUIRE(diags.size() == 1);
+    CHECK(diags[0].code == diag::UnusedVariable);
+    REQUIRE(diags[0].ranges.size() == 1);
+    CHECK(compilation.getSourceManager()->getText(diags[0].ranges[0]) == "unused_name");
+}
+
 TEST_CASE("Undriven net via unused modport writer") {
     auto& text = R"(
 interface status_if;
