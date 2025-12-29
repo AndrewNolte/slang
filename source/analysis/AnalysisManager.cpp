@@ -13,6 +13,7 @@
 #include "slang/analysis/DataFlowAnalysis.h"
 #include "slang/ast/ASTDiagMap.h"
 #include "slang/ast/Compilation.h"
+#include "slang/text/SourceManager.h"
 
 namespace slang::analysis {
 
@@ -39,6 +40,16 @@ Diagnostic& AnalysisContext::addDiag(const Symbol& symbol, DiagCode code, Source
 
 Diagnostic& AnalysisContext::addDiag(const Symbol& symbol, DiagCode code, SourceRange sourceRange) {
     return diagnostics.add(symbol, code, sourceRange);
+}
+
+Diagnostic& AnalysisContext::addDiag(const Symbol& symbol, DiagCode code) {
+    if (manager->sourceManager->isMacroLoc(symbol.location)) {
+        return diagnostics.add(symbol, code, symbol.location);
+    }
+    else {
+        return diagnostics.add(
+            symbol, code, SourceRange{symbol.location, symbol.location + symbol.name.length()});
+    }
 }
 
 AnalysisManager::AnalysisManager(AnalysisOptions options) :
