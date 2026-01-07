@@ -573,10 +573,21 @@ static const Symbol* retargetIfacePort(const HierarchicalReference& ref,
         if (!symbol)
             return nullptr;
 
+        auto& elem = path[i];
+
+        if (elem.symbol->kind == SymbolKind::InstanceArray) {
+            instanceArrayElems = elem.symbol->as<InstanceArraySymbol>().elements;
+            continue;
+        }
+
+        if (elem.symbol->kind == SymbolKind::GenerateBlockArray) {
+            symbol = elem.symbol;
+            continue;
+        }
+
         // instanceArrayElems is valid when the prior entry in the path
-        // did a range select of an interface instance array. We don't
-        // have a way to represent that range as a symbol, so we track this
-        // as a separate optional span of selected instances.
+        // was an instance array or did a range select. We don't have a way
+        // to represent an instance range as a symbol, so we track this separately.
         if (!instanceArrayElems) {
             if (symbol->kind == SymbolKind::Instance) {
                 auto& body = symbol->as<InstanceSymbol>().body;
@@ -595,15 +606,11 @@ static const Symbol* retargetIfacePort(const HierarchicalReference& ref,
                     SLANG_ASSERT(symbol);
                 }
             }
-            else if (symbol->kind == SymbolKind::InstanceArray) {
-                instanceArrayElems = symbol->as<InstanceArraySymbol>().elements;
-            }
             else if (!symbol->isScope()) {
                 return nullptr;
             }
         }
 
-        auto& elem = path[i];
         if (auto index = std::get_if<int32_t>(&elem.selector)) {
             // We're doing an element select here.
             if (instanceArrayElems) {
