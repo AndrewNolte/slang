@@ -1244,6 +1244,7 @@ static const Symbol* selectSingleChild(const Symbol& symbol, const BitSelectSynt
 
     if (symbol.kind == SymbolKind::InstanceArray) {
         auto& array = symbol.as<InstanceArraySymbol>();
+        result.path.emplace_back(array);
         if (array.elements.empty())
             return nullptr;
 
@@ -1262,6 +1263,7 @@ static const Symbol* selectSingleChild(const Symbol& symbol, const BitSelectSynt
     }
     else {
         auto& array = symbol.as<GenerateBlockArraySymbol>();
+        result.path.emplace_back(array);
         if (!array.valid)
             return nullptr;
 
