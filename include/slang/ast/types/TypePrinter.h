@@ -45,6 +45,9 @@ struct SLANG_EXPORT TypePrintingOptions {
     /// Print enums as links instead of their expanded type details.
     bool enumsAsLinks = false;
 
+    /// Print the constant range of integral types for packed non-array objects
+    bool printIntegralRange = false;
+
     /// Selects a style for anonymous types, either the system ID name
     /// or a more human-friendly name.
     enum AnonymousTypeStyle { SystemName, FriendlyName } anonymousTypeStyle = SystemName;
