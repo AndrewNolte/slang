@@ -35,9 +35,13 @@ TypePrinter::TypePrinter() : buffer(std::make_unique<FormatBuffer>()) {
 
 TypePrinter::~TypePrinter() = default;
 
+void TypePrinter::maybeAddQuote() {
+    if (options.quoteChar)
+        buffer->append(std::string_view(&*options.quoteChar, 1));
+}
+
 void TypePrinter::append(const Type& type) {
-    if (options.addSingleQuotes)
-        buffer->append("'");
+    maybeAddQuote();
 
     if (options.printAKA && type.kind == SymbolKind::TypeAlias) {
         if (!options.elideScopeNames)
@@ -48,8 +52,7 @@ void TypePrinter::append(const Type& type) {
         type.visit(*this, ""sv);
     }
 
-    if (options.addSingleQuotes)
-        buffer->append("'");
+    maybeAddQuote();
 
     if (options.printAKA && type.kind == SymbolKind::TypeAlias)
         printAKA(type);
@@ -513,14 +516,16 @@ void TypePrinter::printAKA(const Type& type) {
     }
 
     if (target != &type && target->name != type.name) {
-        buffer->append(" (aka '");
+        buffer->append(" (aka ");
+        maybeAddQuote();
         target->visit(*this, ""sv);
-        buffer->append("')");
+        maybeAddQuote();
+        buffer->append(")");
     }
 }
 
 TypeArgFormatter::TypeArgFormatter() {
-    printer.options.addSingleQuotes = true;
+    printer.options.quoteChar = '\'';
     printer.options.elideScopeNames = true;
     printer.options.printAKA = true;
     printer.options.anonymousTypeStyle = TypePrintingOptions::FriendlyName;
