@@ -219,6 +219,20 @@ private:
     std::span<const Expression* const> elements_;
 };
 
+class SLANG_EXPORT InvalidAssignmentPatternExpression final
+    : public AssignmentPatternExpressionBase {
+public:
+    InvalidAssignmentPatternExpression(ExpressionKind kind, const Type& badType,
+                                       std::span<const Expression* const> elements,
+                                       SourceRange sourceRange) :
+        AssignmentPatternExpressionBase(kind, badType, elements, sourceRange) {}
+
+    static Expression& forAssignment(Compilation& compilation,
+                                     const syntax::AssignmentPatternSyntax& syntax,
+                                     const ASTContext& context, const Type& type,
+                                     SourceRange sourceRange);
+};
+
 /// Represents a simple assignment pattern expression.
 class SLANG_EXPORT SimpleAssignmentPatternExpression final
     : public AssignmentPatternExpressionBase {

@@ -759,19 +759,31 @@ Expression& Expression::bindAssignmentPattern(Compilation& comp,
                                               const Type* assignmentTarget) {
     SourceRange range = syntax.sourceRange();
 
+    const AssignmentPatternSyntax& p = *syntax.pattern;
+    auto getBadExpr = [&]() -> Expression& {
+        auto& expr = InvalidAssignmentPatternExpression::forAssignment(comp, p, context,
+                                                                       *assignmentTarget, range);
+        return badExpr(comp, &expr);
+    };
+
     if (syntax.type) {
         assignmentTarget = &comp.getType(*syntax.type, context);
         if (!assignmentTarget->isSimpleType() && syntax.type->kind != SyntaxKind::TypeReference) {
             if (!assignmentTarget->isError())
                 context.addDiag(diag::BadAssignmentPatternType, range) << *assignmentTarget;
-            return badExpr(comp, nullptr);
+            return getBadExpr();
         }
     }
 
     if (!assignmentTarget || assignmentTarget->isError()) {
-        if (!assignmentTarget)
+        if (!assignmentTarget) {
             context.addDiag(diag::AssignmentPatternNoContext, syntax.sourceRange());
-        return badExpr(comp, nullptr);
+            auto& expr = InvalidAssignmentPatternExpression::forAssignment(comp, p, context,
+                                                                           comp.getErrorType(),
+                                                                           range);
+            return badExpr(comp, &expr);
+        }
+        return getBadExpr();
     }
 
     const Type& type = *assignmentTarget;
@@ -806,13 +818,12 @@ Expression& Expression::bindAssignmentPattern(Compilation& comp,
     }
     else {
         context.addDiag(diag::BadAssignmentPatternType, range) << type;
-        return badExpr(comp, nullptr);
+        return getBadExpr();
     }
 
-    const AssignmentPatternSyntax& p = *syntax.pattern;
     if (context.flags.has(ASTFlags::LValue) && p.kind != SyntaxKind::SimpleAssignmentPattern) {
         context.addDiag(diag::ExpressionNotAssignable, range);
-        return badExpr(comp, nullptr);
+        return getBadExpr();
     }
 
     if (structScope) {
@@ -978,6 +989,43 @@ void AssignmentPatternExpressionBase::serializeTo(ASTSerializer& serializer) con
             serializer.serialize(*elem);
         serializer.endArray();
     }
+}
+
+Expression& InvalidAssignmentPatternExpression::forAssignment(Compilation& comp,
+                                                              const AssignmentPatternSyntax& syntax,
+                                                              const ASTContext& context,
+                                                              const Type& targetType,
+                                                              SourceRange sourceRange) {
+    SmallVector<const Expression*> elems;
+    ExpressionKind kind;
+
+    switch (syntax.kind) {
+        case SyntaxKind::SimpleAssignmentPattern:
+            for (auto item : syntax.as<SimpleAssignmentPatternSyntax>().items)
+                elems.push_back(&selfDetermined(comp, *item, context));
+            kind = ExpressionKind::SimpleAssignmentPattern;
+            break;
+        case SyntaxKind::StructuredAssignmentPattern:
+            // We shouldn't parse item->key expressions since we don't have a scope to resolve with
+            for (auto item : syntax.as<StructuredAssignmentPatternSyntax>().items) {
+                elems.push_back(&selfDetermined(comp, *item->expr, context));
+            }
+            kind = ExpressionKind::StructuredAssignmentPattern;
+            break;
+        case SyntaxKind::ReplicatedAssignmentPattern: {
+            auto& replSyntax = syntax.as<ReplicatedAssignmentPatternSyntax>();
+            elems.push_back(&selfDetermined(comp, *replSyntax.countExpr, context));
+            for (auto item : replSyntax.items)
+                elems.push_back(&selfDetermined(comp, *item, context));
+            kind = ExpressionKind::ReplicatedAssignmentPattern;
+            break;
+        }
+        default:
+            SLANG_UNREACHABLE;
+    }
+
+    return *comp.emplace<InvalidAssignmentPatternExpression>(kind, targetType, elems.copy(comp),
+                                                             sourceRange);
 }
 
 Expression& SimpleAssignmentPatternExpression::forStruct(
