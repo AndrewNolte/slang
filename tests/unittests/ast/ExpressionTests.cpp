@@ -354,6 +354,22 @@ TEST_CASE("Expression types") {
     CHECK(diags[7].code == diag::NotBooleanConvertible);
 }
 
+TEST_CASE("Invalid cast target still binds operand") {
+    auto tree = SyntaxTree::fromText(R"(
+module m;
+    initial missing_t'(missing_value);
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+
+    auto& diags = compilation.getAllDiagnostics();
+    REQUIRE(diags.size() == 2);
+    CHECK(diags[0].code == diag::UndeclaredIdentifier);
+    CHECK(diags[1].code == diag::UndeclaredIdentifier);
+}
+
 TEST_CASE("Expression - bad name references") {
     auto tree = SyntaxTree::fromText(R"(
 module m1;
