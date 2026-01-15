@@ -268,18 +268,31 @@ static bool actuallyNeededCast(const Type& type, const Expression& operand) {
 Expression& ConversionExpression::fromSyntax(Compilation& comp, const CastExpressionSyntax& syntax,
                                              const ASTContext& context,
                                              const Type* assignmentTarget) {
-    auto& targetExpr = bind(*syntax.left, context, ASTFlags::AllowDataType);
-    if (targetExpr.bad())
-        return badExpr(comp, nullptr);
+    const Type* type = &comp.getErrorType();
+    auto bindOperand = [&](const Type* target = nullptr) -> Expression& {
+        return create(comp, *syntax.right, context, ASTFlags::StreamingAllowed, target);
+    };
+    auto result = [&](Expression& operand, ConversionKind cast = ConversionKind::Explicit) {
+        return comp.emplace<ConversionExpression>(*type, cast, operand, syntax.sourceRange());
+    };
 
-    auto type = &comp.getErrorType();
+    auto& targetExpr = bind(*syntax.left, context, ASTFlags::AllowDataType);
+    if (targetExpr.bad()) {
+        return badExpr(comp, result(bindOperand()));
+    }
+
     Expression* operand;
+    auto conversion = [&](ConversionKind cast = ConversionKind::Explicit) {
+        return result(*operand, cast);
+    };
+
     if (targetExpr.kind == ExpressionKind::DataType) {
         type = targetExpr.type;
+        bool badCastType = false;
         if (!type->isSimpleType() && !type->isError() && !type->isString() &&
             syntax.left->kind != SyntaxKind::TypeReference) {
             context.addDiag(diag::BadCastType, targetExpr.sourceRange) << *type;
-            return badExpr(comp, nullptr);
+            badCastType = true;
         }
 
         // Don't pass type as assignmentTarget for streaming operands: the existing
@@ -289,41 +302,38 @@ Expression& ConversionExpression::fromSyntax(Compilation& comp, const CastExpres
         // check the inner expression kind.
         const bool isStreamingOperand = syntax.right->expression->kind ==
                                         SyntaxKind::StreamingConcatenationExpression;
-        operand = &create(comp, *syntax.right, context, ASTFlags::StreamingAllowed,
-                          isStreamingOperand ? nullptr : type);
-        if (operand->bad())
-            return badExpr(comp, nullptr);
+        operand = &bindOperand(badCastType || isStreamingOperand ? nullptr : type);
+        if (badCastType || operand->bad())
+            return badExpr(comp, conversion());
     }
     else {
         auto val = context.evalInteger(targetExpr);
-        if (!val || !context.requireGtZero(val, targetExpr.sourceRange))
-            return badExpr(comp, nullptr);
+        if (!val || !context.requireGtZero(val, targetExpr.sourceRange)) {
+            return badExpr(comp, result(bindOperand()));
+        }
 
         bitwidth_t width = bitwidth_t(*val);
-        if (!context.requireValidBitWidth(width, targetExpr.sourceRange))
-            return badExpr(comp, nullptr);
+        if (!context.requireValidBitWidth(width, targetExpr.sourceRange)) {
+            return badExpr(comp, result(bindOperand()));
+        }
 
-        operand = &create(comp, *syntax.right, context, ASTFlags::StreamingAllowed);
+        operand = &bindOperand();
         if (operand->bad())
-            return badExpr(comp, nullptr);
+            return badExpr(comp, conversion());
 
         if (!operand->type->isIntegral()) {
             auto& diag = context.addDiag(diag::BadIntegerCast, syntax.apostrophe.location());
             diag << *operand->type;
             diag << targetExpr.sourceRange << operand->sourceRange;
-            return badExpr(comp, nullptr);
+            return badExpr(comp, conversion());
         }
 
         type = &comp.getType(width, operand->type->getIntegralFlags());
     }
 
-    auto result = [&](ConversionKind cast = ConversionKind::Explicit) {
-        return comp.emplace<ConversionExpression>(*type, cast, *operand, syntax.sourceRange());
-    };
-
     if (!type->isCastCompatible(*operand->type)) {
         if (!Bitstream::checkClassAccess(*type, context, targetExpr.sourceRange)) {
-            return badExpr(comp, result());
+            return badExpr(comp, conversion());
         }
 
         if (operand->kind == ExpressionKind::Streaming) {
@@ -332,20 +342,20 @@ Expression& ConversionExpression::fromSyntax(Compilation& comp, const CastExpres
                 auto& diag = context.addDiag(diag::BadStreamCast, syntax.apostrophe.location());
                 diag << *type;
                 diag << targetExpr.sourceRange << operand->sourceRange;
-                return badExpr(comp, result());
+                return badExpr(comp, conversion());
             }
         }
         else if (!type->isBitstreamCastable(*operand->type)) {
             auto& diag = context.addDiag(diag::BadConversion, syntax.apostrophe.location());
             diag << *operand->type << *type;
             diag << targetExpr.sourceRange << operand->sourceRange;
-            return badExpr(comp, result());
+            return badExpr(comp, conversion());
         }
         else if (!Bitstream::checkClassAccess(*operand->type, context, operand->sourceRange)) {
-            return badExpr(comp, result());
+            return badExpr(comp, conversion());
         }
 
-        return *result(ConversionKind::BitstreamCast);
+        return *conversion(ConversionKind::BitstreamCast);
     }
 
     // We have a useless cast if the type of the operand matches what we're casting to, unless:
@@ -396,7 +406,7 @@ Expression& ConversionExpression::fromSyntax(Compilation& comp, const CastExpres
         selfDetermined(context, operand);
     }
 
-    return *result();
+    return *conversion();
 }
 
 Expression& ConversionExpression::fromSyntax(Compilation& compilation,
