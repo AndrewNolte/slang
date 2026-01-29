@@ -304,6 +304,11 @@ public:
     /// be freed once no other references exist.
     SourceBuffer replaceBuffer(BufferID id, SmallVector<char>&& buffer);
 
+    /// Re-reads a buffer from disk, updating the cache and marking old data as stale.
+    /// Returns the new SourceBuffer with fresh content, or an error if the read fails.
+    [[nodiscard]]
+    BufferOrError reloadBuffer(BufferID id);
+
     /// Determines whether the given BufferID points to non-stale data.
     bool isLatestData(BufferID id) const;
 
@@ -439,6 +444,9 @@ protected:
 
     SourceBuffer createBufferEntry(std::shared_ptr<FileData> fd, SourceLocation includedFrom,
                                    const SourceLibrary* library, uint64_t sortKey,
+                                   std::unique_lock<std::shared_mutex>& lock);
+
+    SourceBuffer replaceBufferImpl(FileInfo* oldInfo, SmallVector<char>&& buffer,
                                    std::unique_lock<std::shared_mutex>& lock);
 
     BufferOrError openCached(const std::filesystem::path& fullPath, SourceLocation includedFrom,
