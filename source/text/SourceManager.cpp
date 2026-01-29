@@ -711,12 +711,8 @@ std::vector<std::shared_ptr<void>> SourceManager::retainBuffers(
     return result;
 }
 
-SourceBuffer SourceManager::replaceBuffer(BufferID id, SmallVector<char>&& buffer) {
-    std::unique_lock<std::shared_mutex> lock(mutex);
-
-    auto oldInfo = getFileInfo(id, lock);
-    SLANG_ASSERT(oldInfo && oldInfo->data);
-
+SourceBuffer SourceManager::replaceBufferImpl(FileInfo* oldInfo, SmallVector<char>&& buffer,
+                                              std::unique_lock<std::shared_mutex>& lock) {
     auto oldData = oldInfo->data;
 
     // Mark old data as stale, remove reference
@@ -735,6 +731,28 @@ SourceBuffer SourceManager::replaceBuffer(BufferID id, SmallVector<char>&& buffe
     // Old data should be freed if nothing more points to it.
     return createBufferEntry(newData, oldInfo->includedFrom, oldInfo->library, oldInfo->sortKey,
                              lock);
+}
+
+SourceBuffer SourceManager::replaceBuffer(BufferID id, SmallVector<char>&& buffer) {
+    std::unique_lock<std::shared_mutex> lock(mutex);
+    auto oldInfo = getFileInfo(id, lock);
+    SLANG_ASSERT(oldInfo && oldInfo->data);
+    return replaceBufferImpl(oldInfo, std::move(buffer), lock);
+}
+
+SourceManager::BufferOrError SourceManager::reloadBuffer(BufferID id) {
+    std::unique_lock<std::shared_mutex> lock(mutex);
+
+    auto oldInfo = getFileInfo(id, lock);
+    if (!oldInfo || !oldInfo->data)
+        return nonstd::make_unexpected(make_error_code(std::errc::invalid_argument));
+
+    // Read from disk (we need the lock to safely access oldInfo->data->fullPath)
+    SmallVector<char> buffer;
+    if (std::error_code ec = OS::readFile(oldInfo->data->fullPath, buffer))
+        return nonstd::make_unexpected(ec);
+
+    return replaceBufferImpl(oldInfo, std::move(buffer), lock);
 }
 
 bool SourceManager::isLatestData(BufferID id) const {
