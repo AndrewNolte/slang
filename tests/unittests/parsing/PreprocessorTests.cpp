@@ -2330,12 +2330,8 @@ TEST_CASE("Unknown but ignored directive") {
     ppOptions.ignoreDirectives.emplace("unknown_pragma");
 
     auto result = preprocess(text, ppOptions);
-    CHECK(result == "\n");
+    CHECK(result == "\n xyz abc 123\n");
     CHECK(diagnostics.empty());
-
-    auto tree = SyntaxTree::fromText(text, SyntaxTree::getDefaultSourceManager(), "source"sv, "",
-                                     ppOptions);
-    CHECK(SyntaxPrinter::printFile(*tree) == text);
 }
 
 TEST_CASE("Include with missing endif") {

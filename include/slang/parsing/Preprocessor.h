@@ -61,6 +61,10 @@ struct SLANG_EXPORT PreprocessorOptions {
     /// A set of preprocessor directives to be ignored.
     flat_hash_set<std::string_view> ignoreDirectives;
 
+    /// If true, macro invocations are parsed but never expanded.
+    /// Unknown macros are silently ignored instead of producing errors.
+    bool dontExpandMacros = false;
+
     /// A list of mappings from file patterns to language keyword versions.
     std::vector<std::pair<std::string, KeywordVersion>> keywordMapping;
 };
@@ -153,6 +157,9 @@ public:
     /// Gets the currently active source library, or nullptr if none has been set.
     const SourceLibrary* getCurrentLibrary() const;
 
+    /// Gets the preprocessor options.
+    const PreprocessorOptions& getOptions() const { return options; }
+
     /// Gets the source manager associated with the preprocessor.
     SourceManager& getSourceManager() const { return sourceManager; }
 
@@ -188,7 +195,7 @@ private:
     Trivia handleIncludeDirective(Token directive);
     Trivia handleResetAllDirective(Token directive);
     Trivia handleDefineDirective(Token directive);
-    std::pair<Trivia, Trivia> handleMacroUsage(Token directive);
+    Trivia handleMacroUsage(Token directive);
     Trivia handleIfDefDirective(Token directive, bool inverted);
     Trivia handleElsIfDirective(Token directive);
     Trivia handleElseDirective(Token directive);
@@ -321,7 +328,7 @@ private:
 
     // Macro handling methods
     MacroDef findMacro(Token directive);
-    std::pair<syntax::MacroActualArgumentListSyntax*, Trivia> handleTopLevelMacro(Token directive);
+    syntax::MacroActualArgumentListSyntax* handleTopLevelMacro(Token directive);
     bool expandMacro(MacroDef macro, MacroExpansion& expansion,
                      syntax::MacroActualArgumentListSyntax* actualArgs);
     bool expandIntrinsic(MacroIntrinsic intrinsic, MacroExpansion& expansion);
