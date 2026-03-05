@@ -373,10 +373,7 @@ Token Preprocessor::handleDirectives(Token token) {
                         trivia.push_back(handleDefineDirective(token));
                         break;
                     case SyntaxKind::MacroUsage: {
-                        auto [directive, extra] = handleMacroUsage(token);
-                        trivia.push_back(directive);
-                        if (extra)
-                            trivia.push_back(extra);
+                        trivia.push_back(handleMacroUsage(token));
                         break;
                     }
                     case SyntaxKind::IfDefDirective:
@@ -750,14 +747,14 @@ Trivia Preprocessor::handleDefineDirective(Token directive) {
     return Trivia(TriviaKind::Directive, result);
 }
 
-std::pair<Trivia, Trivia> Preprocessor::handleMacroUsage(Token directive) {
+Trivia Preprocessor::handleMacroUsage(Token directive) {
     // delegate to a nested function to simplify the error handling paths
     inMacroBody = true;
-    auto [actualArgs, extraTrivia] = handleTopLevelMacro(directive);
+    auto actualArgs = handleTopLevelMacro(directive);
     inMacroBody = false;
 
     auto syntax = alloc.emplace<MacroUsageSyntax>(directive, actualArgs);
-    return std::make_pair(Trivia(TriviaKind::Directive, syntax), extraTrivia);
+    return Trivia(TriviaKind::Directive, syntax);
 }
 
 Trivia Preprocessor::handleIfDefDirective(Token directive, bool inverted) {
