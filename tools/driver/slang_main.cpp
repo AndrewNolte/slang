@@ -136,6 +136,11 @@ int driverMain(int argc, TArgs argv) {
         driver.cmdLine.addEnum<CSTJsonMode, CSTJsonMode_traits>("--cst-json-mode", cstJsonMode,
                                                                 "CST JSON output mode", "<mode>");
 
+        std::optional<bool> cstJsonNoExpand;
+        driver.cmdLine.add(
+            "--cst-json-no-expand", cstJsonNoExpand,
+            "When dumping CST to JSON, don't expand macros and don't follow includes");
+
         std::vector<std::string> astJsonScopes;
         driver.cmdLine.add("--ast-json-scope", astJsonScopes,
                            "When dumping AST to JSON, include only the scopes specified by the "
@@ -170,6 +175,12 @@ int driverMain(int argc, TArgs argv) {
                                   VersionInfo::getMinor(), VersionInfo::getPatch(),
                                   VersionInfo::getHash()));
             return 0;
+        }
+
+        // Not expanding macros only makes sense in the context of dumping CSTs
+        if (cstJsonFile && cstJsonNoExpand == true) {
+            driver.options.dontExpandMacros = true;
+            driver.options.maxIncludeDepth = 0;
         }
 
         if (!driver.processOptions())
@@ -216,6 +227,7 @@ int driverMain(int argc, TArgs argv) {
             if (cstJsonFile) {
                 TimeTraceScope timeScope("cstSerialization"sv, ""sv);
                 printCSTJson(driver, *cstJsonFile, cstJsonMode.value_or(CSTJsonMode::Full));
+                return true;
             }
 
             if (onlyParse == true)

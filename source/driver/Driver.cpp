@@ -1055,6 +1055,8 @@ void Driver::addParseOptions(Bag& bag) const {
     ppoptions.keywordMapping = options.keywordMapping;
     if (options.maxIncludeDepth.has_value())
         ppoptions.maxIncludeDepth = *options.maxIncludeDepth;
+    if (options.dontExpandMacros == true)
+        ppoptions.dontExpandMacros = true;
     for (const auto& d : options.ignoreDirectives)
         ppoptions.ignoreDirectives.emplace(d);
 
