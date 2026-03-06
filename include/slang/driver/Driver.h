@@ -164,6 +164,9 @@ public:
         /// for compatibility with old Verilog tools.
         std::optional<bool> enableLegacyProtect;
 
+        /// If true, macro invocations are parsed but never expanded.
+        std::optional<bool> dontExpandMacros;
+
         /// A set of preprocessor directives to be ignored.
         std::vector<std::string> ignoreDirectives;
 
