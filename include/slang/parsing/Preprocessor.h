@@ -179,6 +179,14 @@ public:
     /// of the preprocessor (this calls into Lexer::splitTokens).
     void splitTokens(Token sourceToken, size_t offset, SmallVectorBase<Token>& results);
 
+    /// Returns true if an unexpanded macro was recently encountered,
+    /// indicating that subsequent parse errors are likely spurious.
+    bool hasRecentUnexpandedMacro() const { return recentUnexpandedMacro; }
+
+    /// Clears the unexpanded macro flag, typically after a semicolon
+    /// or end keyword delimits the affected region.
+    void clearRecentUnexpandedMacro() { recentUnexpandedMacro = false; }
+
 private:
     friend class MacroOpEvaluator;
 
@@ -422,6 +430,7 @@ private:
     // Directives don't get handled when lexing within a macro body
     // (either define or usage).
     bool inMacroBody = false;
+    bool recentUnexpandedMacro = false;
 
     // Special handling for pulling directives when in an ifdef condition expr.
     bool inIfDefCondition = false;

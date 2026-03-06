@@ -350,6 +350,7 @@ MacroActualArgumentListSyntax* Preprocessor::handleTopLevelMacro(Token directive
     auto parseUnknownDirective = [&]() -> MacroActualArgumentListSyntax* {
         // If we see a parenthesis next, let's assume they tried to invoke a function-like macro
         // and skip over the tokens.
+        recentUnexpandedMacro = true;
         if (peek(TokenKind::OpenParenthesis))
             return MacroParser(*this).parseActualArgumentList(directive);
         return nullptr;

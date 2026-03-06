@@ -87,6 +87,14 @@ protected:
 
     BumpAllocator& alloc;
 
+    /// Scratch diagnostic used to silently discard diagnostics that should be
+    /// suppressed (e.g. parse errors near ignored macros).
+    Diagnostic suppressedDiag;
+
+    /// Scratch diagnostics collection used by expect() to silently discard
+    /// diagnostics from Token::createExpected when near ignored macros.
+    Diagnostics suppressedDiags;
+
     /// Generalized helper method for parsing a group of things that are bookended by
     /// known token kinds. The point of wrapping it in a function is that if the starting
     /// token is missing, we don't even bother trying to parse the rest of the group.

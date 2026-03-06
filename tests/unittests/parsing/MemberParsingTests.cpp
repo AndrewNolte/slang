@@ -1679,3 +1679,48 @@ endmodule
     REQUIRE(diagnostics.size() == 1);
     CHECK(diagnostics[0].code == diag::TypoKeyword);
 }
+TEST_CASE("Undefined macros used in member syntaxes") {
+    // When an undefined macro is followed by additional tokens (e.g. an
+    // assignment), the parser should skip without
+    // issuing cascading parse errors.
+    auto tree = SyntaxTree::fromText(R"(
+module top;
+    `COMB_ASSIGN(x, y) = z;
+    `SOME_OTHER_MACRO foo;
+    `OTHER_MACRO_WITH_SEMI
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+
+    auto& diags = compilation.getParseDiagnostics();
+    CHECK(
+        std::ranges::all_of(diags, [](const auto& d) { return d.code == diag::UnknownDirective; }));
+}
+
+TEST_CASE("Undefined macros in port list") {
+    // Macros used as port declarations should not produce cascading
+    // parse errors like "expected ';'" or "expected member".
+    auto tree = SyntaxTree::fromText(R"(
+module top #(
+    parameter int width = 8
+)(
+    `DUT_CLK_RST,
+    `DUT_SINK(sink, width),
+    `INPUT_SIGNAL signal
+);
+
+    submodule dut (.*);
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+
+    auto& diags = compilation.getParseDiagnostics();
+    REQUIRE(diags.size() == 3);
+    CHECK(diags[0].code == diag::UnknownDirective);
+    CHECK(diags[1].code == diag::UnknownDirective);
+    CHECK(diags[2].code == diag::UnknownDirective);
+}
