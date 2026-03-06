@@ -47,7 +47,8 @@ SyntaxNode& Parser::parseGuess() {
     if (statement.kind == SyntaxKind::EmptyStatement &&
         statement.as<EmptyStatementSyntax>().semicolon.isMissing()) {
 
-        getDiagnostics().pop_back();
+        if (!getDiagnostics().empty())
+            getDiagnostics().pop_back();
         auto& unit = parseCompilationUnit();
 
         // If there's only one member, pull it out for convenience

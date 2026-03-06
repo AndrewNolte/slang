@@ -44,6 +44,14 @@ Diagnostic& ParserBase::addDiag(DiagCode code, SourceLocation location) {
             location = last.location() + last.rawText().size();
     }
 
+    // Suppress parse errors near unexpanded macro invocations —
+    // the error is likely caused by the unexpanded macro rather
+    // than a real syntax issue.
+    if (getPP().hasRecentUnexpandedMacro()) {
+        suppressedDiag = Diagnostic(code, location);
+        return suppressedDiag;
+    }
+
     return getDiagnostics().add(code, location);
 }
 
@@ -79,9 +87,15 @@ Token ParserBase::consume() {
 
     if (SF::isOpenDelimOrKeyword(result.kind))
         openDelims.push_back(result);
-    else if (SF::isCloseDelimOrKeyword(result.kind) && !openDelims.empty()) {
-        lastPoppedDelims = {openDelims.back(), result};
-        openDelims.pop_back();
+    else if (SF::isCloseDelimOrKeyword(result.kind)) {
+        if (!openDelims.empty()) {
+            lastPoppedDelims = {openDelims.back(), result};
+            openDelims.pop_back();
+        }
+        getPP().clearRecentUnexpandedMacro();
+    }
+    else if (result.kind == TokenKind::Semicolon) {
+        getPP().clearRecentUnexpandedMacro();
     }
 
     return result;
@@ -132,8 +146,10 @@ Token ParserBase::expect(TokenKind kind) {
         lastPoppedDelims = {Token(), Token()};
     }
 
-    Token result = Token::createExpected(alloc, getDiagnostics(), peek(), kind, window.lastConsumed,
-                                         matchingDelim);
+    Token result = Token::createExpected(alloc,
+                                         getPP().hasRecentUnexpandedMacro() ? suppressedDiags
+                                                                            : getDiagnostics(),
+                                         peek(), kind, window.lastConsumed, matchingDelim);
     return result;
 }
 
@@ -224,6 +240,9 @@ SourceLocation ParserBase::getLastLocation() {
 
 bool ParserBase::haveDiagAtCurrentLoc() {
     Diagnostics& diags = getDiagnostics();
+    if (getPP().hasRecentUnexpandedMacro()) {
+        return true;
+    }
     auto location = getLastLocation();
     return !diags.empty() && diags.back().isError() &&
            (diags.back().location == location || diags.back().location == peek().location());
