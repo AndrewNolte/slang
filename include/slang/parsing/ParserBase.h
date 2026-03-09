@@ -47,6 +47,10 @@ protected:
 
     const std::pair<Token, Token>& getLastPoppedDelims() const { return lastPoppedDelims; }
 
+    /// Returns any unclosed delimiters or keywords remaining after parsing,
+    /// indicating a structural imbalance in the parsed source.
+    std::span<const Token> getOpenDelims() const { return {openDelims.data(), openDelims.size()}; }
+
     Preprocessor& getPP() { return window.tokenSource; }
 
     /// Helper class that maintains a sliding window of tokens, with lookahead.

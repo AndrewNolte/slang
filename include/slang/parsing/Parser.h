@@ -170,6 +170,8 @@ public:
     /// Gets the current set of metadata collected during parsing.
     ParserMetadata&& getMetadata();
 
+    using ParserBase::getOpenDelims;
+
 private:
     using ExpressionOptions = detail::ExpressionOptions;
     using NameOptions = detail::NameOptions;
