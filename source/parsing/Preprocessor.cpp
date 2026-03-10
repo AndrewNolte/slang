@@ -753,6 +753,9 @@ Trivia Preprocessor::handleMacroUsage(Token directive) {
     auto actualArgs = handleTopLevelMacro(directive);
     inMacroBody = false;
 
+    if (options.dontExpandMacros)
+        return Trivia();
+
     auto syntax = alloc.emplace<MacroUsageSyntax>(directive, actualArgs);
     return Trivia(TriviaKind::Directive, syntax);
 }

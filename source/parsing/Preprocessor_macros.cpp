@@ -357,7 +357,23 @@ MacroActualArgumentListSyntax* Preprocessor::handleTopLevelMacro(Token directive
     };
 
     if (options.dontExpandMacros) {
-        return parseUnknownDirective();
+        auto rv = parseUnknownDirective();
+        // Create a fake identifier token before any peek tokens.
+        auto* trv = alloc.emplace<Trivia>(TriviaKind::Directive,
+                                          alloc.emplace<MacroUsageSyntax>(directive, rv));
+        auto fakeIdent = Token(alloc, TokenKind::Identifier, std::span(trv, 1), "",
+                               directive.location());
+        // FIXME: missing token ignored so we're using real token
+        // Token::createMissing(alloc, TokenKind::Identifier,
+        // directive.location()).withTrivia(alloc, std::span(trv, 1));
+        expandedTokens.emplace_back(fakeIdent);
+
+        if (currentToken)
+            expandedTokens.emplace_back(currentToken);
+        currentToken = Token();
+
+        currentMacroToken = expandedTokens.begin();
+        return nullptr;
     }
 
     auto macro = findMacro(directive);
