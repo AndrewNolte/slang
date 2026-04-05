@@ -98,6 +98,17 @@ public:
     /// Explicit boolean conversion operator that defers to @a valid
     constexpr explicit operator bool() const { return valid(); }
 
+    /// Wrapper type for use in switch statements.
+    struct Key {
+        uint32_t value;
+        constexpr operator uint32_t() const { return value; }
+    };
+
+    /// Returns a switchable key for use in switch/case statements.
+    constexpr Key key() const {
+        return {(uint32_t(subsystem) << 16) | code};
+    }
+
     /// Three way comparison.
     constexpr friend auto operator<=>(DiagCode left, DiagCode right) = default;
 

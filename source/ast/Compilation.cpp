@@ -15,7 +15,9 @@
 #include "slang/ast/ScriptSession.h"
 #include "slang/ast/SystemSubroutine.h"
 #include "slang/ast/types/TypePrinter.h"
+#include "slang/diagnostics/ConstEvalDiags.h"
 #include "slang/diagnostics/DiagnosticEngine.h"
+#include "slang/diagnostics/Diagnostics.h"
 #include "slang/diagnostics/ExpressionsDiags.h"
 #include "slang/diagnostics/LookupDiags.h"
 #include "slang/parsing/Parser.h"
@@ -1658,7 +1660,23 @@ void Compilation::addDiagnostics(const Diagnostics& diagnostics) {
 }
 
 bool alwaysBlockedUntakenDiag(const DiagCode& code) {
-    return code == diag::IndexOOB || code == diag::ScopeIndexOutOfRange;
+    switch (code.key()) {
+        case diag::IndexOOB.key():
+        case diag::RangeOOB.key():
+        case diag::RangeWidthOOB.key():
+        case diag::ShiftCountOverflow.key():
+        case diag::ShiftCountNegative.key():
+        case diag::CaseOutsideRange.key():
+        case diag::ScopeIndexOutOfRange.key():
+        case diag::ReplicationZeroOutsideConcat.key():
+        case diag::BadInstanceArrayRange.key():
+        case diag::ConstantConversion.key():
+        case diag::ConstEvalDynamicArrayIndex.key():
+        case diag::ConstEvalDynamicArrayRange.key():
+            return true;
+        default:
+            return false;
+    }
 }
 
 Diagnostic& Compilation::addDiag(Diagnostic diag) {
