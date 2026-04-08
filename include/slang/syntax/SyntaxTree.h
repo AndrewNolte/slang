@@ -45,6 +45,7 @@ public:
         nonstd::expected<std::shared_ptr<SyntaxTree>, std::pair<std::error_code, std::string_view>>;
     using MacroList = std::span<const DefineDirectiveSyntax* const>;
     using IncludeList = std::span<const parsing::IncludeMetadata>;
+    using MacroUsageList = std::span<const parsing::MacroUsageMetadata>;
 
     /// Indicates whether this syntax tree represents a "library" compilation unit,
     /// which means that modules declared within it are not automatically instantiated.
@@ -225,6 +226,9 @@ public:
     /// Gets the list of include directives that were encountered while parsing.
     IncludeList getIncludeDirectives() const { return includes; }
 
+    /// Gets the list of macro usages that were expanded while parsing.
+    MacroUsageList getMacroUsages() const { return macroUsageList; }
+
     /// Gets the list of source buffer IDs that this syntax tree was created from.
     std::span<const BufferID> getSourceBufferIds() const { return sourceBufferIds; }
 
@@ -247,6 +251,7 @@ private:
                BumpAllocator&& alloc, Diagnostics&& diagnostics, parsing::ParserMetadata&& metadata,
                std::vector<const DefineDirectiveSyntax*>&& macros,
                std::vector<parsing::IncludeMetadata>&& includes,
+               std::vector<parsing::MacroUsageMetadata>&& macroUsages,
                std::vector<BufferID>&& sourceBufferIds, Bag options);
 
     static std::shared_ptr<SyntaxTree> create(SourceManager& sourceManager,
@@ -263,6 +268,7 @@ private:
     std::unique_ptr<parsing::ParserMetadata> metadata;
     std::vector<const DefineDirectiveSyntax*> macros;
     std::vector<parsing::IncludeMetadata> includes;
+    std::vector<parsing::MacroUsageMetadata> macroUsageList;
     std::vector<BufferID> sourceBufferIds;
 };
 
