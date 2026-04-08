@@ -128,11 +128,13 @@ SyntaxTree::SyntaxTree(SyntaxNode* root, const SourceLibrary* library, SourceMan
                        BumpAllocator&& alloc, Diagnostics&& diagnostics, ParserMetadata&& metadata,
                        std::vector<const DefineDirectiveSyntax*>&& macros,
                        std::vector<parsing::IncludeMetadata>&& includes,
+                       std::vector<parsing::MacroUsageMetadata>&& macroUsages,
                        std::vector<BufferID>&& sourceBufferIds, Bag options) :
     rootNode(root), library(library), sourceMan(sourceManager), alloc(std::move(alloc)),
     diagnosticsBuffer(std::move(diagnostics)), options_(std::move(options)),
     metadata(std::make_unique<ParserMetadata>(std::move(metadata))), macros(std::move(macros)),
-    includes(std::move(includes)), sourceBufferIds(std::move(sourceBufferIds)) {
+    includes(std::move(includes)), macroUsageList(std::move(macroUsages)),
+    sourceBufferIds(std::move(sourceBufferIds)) {
 }
 
 std::shared_ptr<SyntaxTree> SyntaxTree::create(SourceManager& sourceManager,
@@ -185,10 +187,10 @@ std::shared_ptr<SyntaxTree> SyntaxTree::create(SourceManager& sourceManager,
     for (const auto& source : sources)
         bufferIds.push_back(source.id);
 
-    return std::shared_ptr<SyntaxTree>(
-        new SyntaxTree(root, library, sourceManager, std::move(alloc), std::move(diagnostics),
-                       parser.getMetadata(), preprocessor.getDefinedMacros(),
-                       preprocessor.getIncludeDirectives(), std::move(bufferIds), options));
+    return std::shared_ptr<SyntaxTree>(new SyntaxTree(
+        root, library, sourceManager, std::move(alloc), std::move(diagnostics),
+        parser.getMetadata(), preprocessor.getDefinedMacros(), preprocessor.getIncludeDirectives(),
+        preprocessor.getMacroUsages(), std::move(bufferIds), options));
 }
 
 std::shared_ptr<SyntaxTree> SyntaxTree::fromLibraryMapFile(std::string_view path,
@@ -231,10 +233,10 @@ std::shared_ptr<SyntaxTree> SyntaxTree::fromLibraryMapBuffer(const SourceBuffer&
 
     std::vector<BufferID> bufferIds = {buffer.id};
 
-    return std::shared_ptr<SyntaxTree>(
-        new SyntaxTree(&root, nullptr, sourceManager, std::move(alloc), std::move(diagnostics),
-                       parser.getMetadata(), preprocessor.getDefinedMacros(),
-                       preprocessor.getIncludeDirectives(), std::move(bufferIds), options));
+    return std::shared_ptr<SyntaxTree>(new SyntaxTree(
+        &root, nullptr, sourceManager, std::move(alloc), std::move(diagnostics),
+        parser.getMetadata(), preprocessor.getDefinedMacros(), preprocessor.getIncludeDirectives(),
+        preprocessor.getMacroUsages(), std::move(bufferIds), options));
 }
 
 bool SyntaxTree::validate() const {
