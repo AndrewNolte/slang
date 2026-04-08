@@ -265,6 +265,30 @@ TEST_CASE("Skipped conditional branches keep nested disabled tokens") {
           std::vector<SyntaxKind>{SyntaxKind::IfDefDirective, SyntaxKind::EndIfDirective});
 }
 
+TEST_CASE("Macro usage metadata") {
+    auto tree = SyntaxTree::fromText(R"(
+`define FOO 1
+int a = `FOO;
+`undef FOO
+`define BAR(x) x
+int b = `BAR(2);
+`undef MISSING
+)");
+
+    CHECK(tree->diagnostics().empty());
+    auto usages = tree->getMacroUsages();
+    REQUIRE(usages.size() == 3);
+
+    CHECK(usages[0].syntax->kind == SyntaxKind::MacroUsage);
+    CHECK(usages[0].definition->name.valueText() == "FOO");
+
+    CHECK(usages[1].syntax->kind == SyntaxKind::UndefDirective);
+    CHECK(usages[1].definition->name.valueText() == "FOO");
+
+    CHECK(usages[2].syntax->kind == SyntaxKind::MacroUsage);
+    CHECK(usages[2].definition->name.valueText() == "BAR");
+}
+
 TEST_CASE("Function macro (simple)") {
     auto& text = "`define FOO(x) x\n`FOO(3)";
     Token token = lexToken(text);
