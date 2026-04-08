@@ -28,6 +28,7 @@ struct MacroActualArgumentListSyntax;
 struct MacroFormalArgumentListSyntax;
 struct MacroActualArgumentSyntax;
 struct MacroFormalArgumentSyntax;
+struct MacroUsageSyntax;
 struct PragmaDirectiveSyntax;
 struct PragmaExpressionSyntax;
 struct IncludeDirectiveSyntax;
@@ -83,6 +84,14 @@ struct IncludeMetadata {
     std::string_view path;
     SourceBuffer buffer;
     bool isSystem;
+};
+
+/// Metadata about a macro reference (usage or undef) and its active definition.
+struct MacroUsageMetadata {
+    /// The syntax node referencing the macro (`MacroUsage or `UndefDirective)
+    const syntax::SyntaxNode* syntax;
+    /// The macro definition that was active at the time
+    const syntax::DefineDirectiveSyntax* definition;
 };
 
 /// Preprocessor - Interface between lexer and parser
@@ -190,6 +199,9 @@ public:
 
     /// Gets all include directives that have been encountered thus far in the preprocessor.
     std::vector<IncludeMetadata> getIncludeDirectives() const;
+
+    /// Gets all macro usages that have been expanded thus far in the preprocessor.
+    std::vector<MacroUsageMetadata> getMacroUsages() const;
 
     /// Splits the provided token at the given offset, taking into account the current state
     /// of the preprocessor (this calls into Lexer::splitTokens).
@@ -532,6 +544,9 @@ private:
 
     // The include directives that have been encountered thus far in the preprocessor.
     std::vector<IncludeMetadata> includeDirectives;
+
+    // The macro usages that have been expanded thus far in the preprocessor.
+    std::vector<MacroUsageMetadata> macroUsages;
 
     // Helper struct for entries on the keyword version stack.
     struct KeywordVersionState {
