@@ -277,6 +277,10 @@ std::vector<IncludeMetadata> Preprocessor::getIncludeDirectives() const {
     return includeDirectives;
 }
 
+std::vector<MacroUsageMetadata> Preprocessor::getMacroUsages() const {
+    return macroUsages;
+}
+
 Token Preprocessor::next() {
     return consume();
 }
@@ -751,12 +755,24 @@ Trivia Preprocessor::handleDefineDirective(Token directive) {
 }
 
 std::pair<Trivia, Trivia> Preprocessor::handleMacroUsage(Token directive) {
+    // Look up the definition before expansion (it may be undef'd later)
+    auto macro = findMacro(directive);
+    auto* definition = macro.valid() && !macro.isIntrinsic() ? macro.syntax : nullptr;
+
     // delegate to a nested function to simplify the error handling paths
     inMacroBody = true;
     auto [actualArgs, extraTrivia] = handleTopLevelMacro(directive);
     inMacroBody = false;
 
-    auto syntax = alloc.emplace<MacroUsageSyntax>(directive, actualArgs);
+    auto* syntax = alloc.emplace<MacroUsageSyntax>(directive, actualArgs);
+
+    if (definition) {
+        macroUsages.push_back(MacroUsageMetadata{
+            .syntax = syntax,
+            .definition = definition,
+        });
+    }
+
     return std::make_pair(Trivia(TriviaKind::Directive, syntax), extraTrivia);
 }
 
@@ -1049,10 +1065,18 @@ Trivia Preprocessor::handleUndefDirective(Token directive) {
         std::string_view name = nameToken.valueText();
         auto it = macros.find(name);
         if (it != macros.end()) {
-            if (!it->second.builtIn)
+            auto* result = alloc.emplace<UndefDirectiveSyntax>(directive, nameToken);
+            if (!it->second.builtIn) {
+                macroUsages.push_back(MacroUsageMetadata{
+                    .syntax = result,
+                    .definition = it->second.syntax,
+                });
                 macros.erase(it);
-            else
+            }
+            else {
                 addDiag(diag::UndefineBuiltinDirective, nameToken.range());
+            }
+            return Trivia(TriviaKind::Directive, result);
         }
     }
 
