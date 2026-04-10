@@ -83,9 +83,16 @@ void Driver::addStandardArgs() {
                 "behavior of VCS and similar simulators");
 
     // Preprocessor
-    cmdLine.add("-D,--define-macro,+define", options.defines,
-                "Define <macro> to <value> (or 1 if <value> ommitted) in all source files",
-                "<macro>=<value>");
+    cmdLine.add(
+        "-D,--define-macro,+define",
+        [this](std::string_view value) {
+            options.defines.emplace_back(value);
+            if (!currentParseSource.empty())
+                defineSources[currentParseSource].emplace_back(value);
+            return "";
+        },
+        "Define <macro> to <value> (or 1 if <value> ommitted) in all source files",
+        "<macro>=<value>");
     cmdLine.add("-U,--undefine-macro", options.undefines,
                 "Undefine macro name at the start of all source files", "<macro>",
                 CommandLineFlags::CommaList);
@@ -550,6 +557,8 @@ bool Driver::processCommandFiles(std::string_view pattern, bool makeRelative, bo
             currPath = fs::current_path(ec);
             fs::current_path(path.parent_path(), ec);
         }
+        auto savedSource = currentParseSource;
+        currentParseSource = path;
 
         bool result;
         if (separateUnit) {
@@ -565,10 +574,13 @@ bool Driver::processCommandFiles(std::string_view pattern, bool makeRelative, bo
             result = parseCommandLine(buffer->data, parseOpts);
         }
 
+        currentParseSource = savedSource;
+
         if (makeRelative)
             fs::current_path(currPath, ec);
 
         activeCommandFiles.erase(path);
+        defineSources.try_emplace(path);
 
         if (!result) {
             anyFailedLoads = true;
