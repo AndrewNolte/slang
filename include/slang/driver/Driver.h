@@ -484,6 +484,12 @@ public:
     /// Sets whether terminal output should use color.
     void setTerminalColorsEnabled(bool enable);
 
+    /// Gets the map from source file to the raw -D defines it contributed.
+    /// Every processed command file has an entry, even if it contributed no defines.
+    const flat_hash_map<std::filesystem::path, std::vector<std::string>>& getDefineSources() const {
+        return defineSources;
+    }
+
 private:
     bool parseUnitListing(const SourceBuffer& sourceBuffer);
     std::string parseMapKeywordVersion(std::string_view value);
@@ -494,7 +500,15 @@ private:
     bool reportLoadErrors();
 
     bool anyFailedLoads = false;
+
+public:
+    /// The file currently being parsed; set by processCommandFiles and can be
+    /// set externally before parseCommandLine to attribute -D defines.
+    std::filesystem::path currentParseSource;
+
+private:
     flat_hash_set<std::filesystem::path> activeCommandFiles;
+    flat_hash_map<std::filesystem::path, std::vector<std::string>> defineSources;
     std::vector<std::tuple<std::string_view, std::string_view, std::string_view>>
         translateOffFormats;
     std::unique_ptr<JsonWriter> jsonWriter;
