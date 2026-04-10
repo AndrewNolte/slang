@@ -107,6 +107,29 @@ TEST_CASE("Driver command files are processed strictly in order") {
     CHECK(std::ranges::is_sorted(fileNames));
 }
 
+TEST_CASE("Driver tracks define sources") {
+    auto guard = OS::captureOutput();
+
+    std::error_code ec;
+    auto path = fs::temp_directory_path(ec) / "slang_define_sources.f";
+    {
+        std::ofstream file(path);
+        file << "-D FOO=1\n";
+        file << "-D BAR=2\n";
+    }
+
+    Driver driver;
+    driver.addStandardArgs();
+    REQUIRE(driver.processCommandFiles(path.string(), false, false));
+
+    auto& defineSources = driver.getDefineSources();
+    auto it = defineSources.find(path);
+    REQUIRE(it != defineSources.end());
+    CHECK(it->second == std::vector<std::string>{"FOO=1", "BAR=2"});
+
+    fs::remove(path, ec);
+}
+
 TEST_CASE("SourceLoader doesn't reload names satisfied by later worklist entries") {
     SourceManager sourceManager;
 
