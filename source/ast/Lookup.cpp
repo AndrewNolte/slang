@@ -2026,6 +2026,15 @@ void Lookup::unqualifiedImpl(const Scope& scope, std::string_view name, LookupLo
                         result.nameRange = savedRange;
                     }
                 }
+                else {
+                    // For array selects we need to add the array to the path
+                    if (originalSyntax &&
+                        originalSyntax->kind == SyntaxKind::IdentifierSelectName &&
+                        (result.found->kind == SymbolKind::InstanceArray ||
+                         result.found->kind == SymbolKind::GenerateBlockArray)) {
+                        result.path.emplace_back(*result.found);
+                    }
+                }
             }
 
             if (done)
