@@ -9,6 +9,7 @@
 #include "slang/ast/symbols/CompilationUnitSymbols.h"
 #include "slang/ast/symbols/InstanceSymbols.h"
 #include "slang/driver/Driver.h"
+#include "slang/driver/SourceLoader.h"
 #include "slang/text/SourceManager.h"
 
 using namespace slang::driver;
@@ -104,6 +105,44 @@ TEST_CASE("Driver command files are processed strictly in order") {
 
     CHECK(fileNames.size() == 4);
     CHECK(std::ranges::is_sorted(fileNames));
+}
+
+TEST_CASE("SourceLoader doesn't reload names satisfied by later worklist entries") {
+    SourceManager sourceManager;
+
+    auto top = SyntaxTree::fromText(R"(
+module top;
+    mid mid();
+    leaf leaf();
+endmodule
+)",
+                                    sourceManager, "", "load_tree_top.sv");
+
+    SourceLoader::SyntaxTreeList trees;
+    trees.push_back(top);
+
+    flat_hash_map<std::string_view, SourceBuffer> buffers;
+    buffers["mid"] = sourceManager.assignText("load_tree_mid.sv", R"(
+module mid;
+    leaf leaf();
+endmodule
+)");
+    buffers["leaf"] = sourceManager.assignText("load_tree_leaf.sv", "module leaf; endmodule");
+
+    int leafLoads = 0;
+    SourceLoader::loadTrees(
+        trees,
+        [&](std::string_view name) {
+            if (name == "leaf")
+                leafLoads++;
+            if (auto it = buffers.find(name); it != buffers.end())
+                return it->second;
+            return SourceBuffer();
+        },
+        sourceManager, {});
+
+    CHECK(leafLoads == 1);
+    CHECK(trees.size() == 3);
 }
 
 static bool contains(std::string_view str, std::string_view value) {
