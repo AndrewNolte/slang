@@ -268,6 +268,10 @@ public:
     /// A missing token was expected and inserted by the parser at a given point.
     bool isMissing() const { return missing; }
 
+    /// A recovery token was inserted by the preprocessor to stand in for source
+    /// that could not be produced, such as an unexpanded macro invocation.
+    bool isRecovery() const { return (numFlags.raw & RecoveryFlag) != 0; }
+
     SourceRange range() const;
     SourceLocation location() const;
     TriviaView trivia() const;
@@ -313,6 +317,8 @@ public:
     bool operator==(const Token& other) const {
         if (kind != other.kind)
             return false;
+        if (isRecovery() != other.isRecovery())
+            return false;
         if (hasInlineTrivia != other.hasInlineTrivia)
             return false;
         if (hasInlineTrivia && triviaCountSmall != other.triviaCountSmall)
@@ -329,6 +335,8 @@ public:
     [[nodiscard]] Token deepClone(BumpAllocator& alloc) const;
 
     static Token createMissing(BumpAllocator& alloc, TokenKind kind, SourceLocation location);
+    static Token createRecovery(BumpAllocator& alloc, const TriviaView& trivia,
+                                SourceLocation location);
     static Token createExpected(BumpAllocator& alloc, Diagnostics& diagnostics, Token actual,
                                 TokenKind expected, Token lastConsumed, Token matchingDelim);
 
@@ -354,6 +362,8 @@ private:
 
     // Some data is stored directly in the token here because we have 6 bytes of padding that
     // would otherwise go unused. The rest is stored in the info block.
+    static constexpr uint8_t RecoveryFlag = 0x80;
+
     bool missing : 1;
     bool hasInfoPtr : 1;
 

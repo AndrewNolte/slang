@@ -219,6 +219,131 @@ TEST_CASE("Macro usage (undefined)") {
     CHECK(diagnostics.back().code == diag::UnknownDirective);
 }
 
+TEST_CASE("dontExpandMacros preserves unknown macro trivia in comma lists") {
+    PreprocessorOptions ppOptions;
+    ppOptions.dontExpandMacros = true;
+
+    diagnostics.clear();
+    Preprocessor preprocessor(getSourceManager(), alloc, diagnostics, Bag(ppOptions));
+    preprocessor.pushSource(R"(
+module top #(
+    parameter int width = 8,
+    `CFG_BLOCK(domain),
+    parameter int depth = 4
+) ();
+endmodule
+)");
+
+    Token recoveryToken;
+    Token commaToken;
+    Token parameterToken;
+    while (true) {
+        auto token = preprocessor.next();
+        if (token.kind == TokenKind::EndOfFile)
+            break;
+
+        if (token.isRecovery() && !token.trivia().empty() &&
+            token.trivia()[0].kind == TriviaKind::Directive &&
+            token.trivia()[0].syntax()->kind == SyntaxKind::MacroUsage) {
+            recoveryToken = token;
+        }
+        else if (recoveryToken && !commaToken && token.kind == TokenKind::Comma) {
+            commaToken = token;
+        }
+        else if (commaToken && token.kind == TokenKind::ParameterKeyword) {
+            parameterToken = token;
+            break;
+        }
+    }
+
+    REQUIRE(recoveryToken);
+    REQUIRE(commaToken);
+    REQUIRE(parameterToken);
+}
+
+TEST_CASE("dontExpandMacros preserves unknown macro trivia before binary operators") {
+    PreprocessorOptions ppOptions;
+    ppOptions.dontExpandMacros = true;
+
+    diagnostics.clear();
+    Preprocessor preprocessor(getSourceManager(), alloc, diagnostics, Bag(ppOptions));
+    preprocessor.pushSource(R"(
+module top;
+    assign dst = `P0 + rhs;
+endmodule
+)");
+
+    Token recoveryToken;
+    Token plusToken;
+    while (true) {
+        auto token = preprocessor.next();
+        if (token.kind == TokenKind::EndOfFile)
+            break;
+
+        if (token.isRecovery())
+            recoveryToken = token;
+        if (token.kind == TokenKind::Plus) {
+            plusToken = token;
+            break;
+        }
+    }
+
+    REQUIRE(recoveryToken);
+    REQUIRE(!recoveryToken.trivia().empty());
+    CHECK(recoveryToken.trivia()[0].kind == TriviaKind::Directive);
+    CHECK(recoveryToken.trivia()[0].syntax()->kind == SyntaxKind::MacroUsage);
+    REQUIRE(plusToken);
+    REQUIRE(!plusToken.trivia().empty());
+    CHECK(plusToken.trivia()[0].kind == TriviaKind::Whitespace);
+}
+
+TEST_CASE("dontExpandMacros preserves unknown macro trivia before postfix tokens") {
+    PreprocessorOptions ppOptions;
+    ppOptions.dontExpandMacros = true;
+
+    diagnostics.clear();
+    Preprocessor preprocessor(getSourceManager(), alloc, diagnostics, Bag(ppOptions));
+    preprocessor.pushSource(R"(
+module top;
+    assign a = `SEL[idx];
+    assign b = `NODE.field;
+endmodule
+)");
+
+    Token openBracket;
+    Token dot;
+    Token firstRecovery;
+    Token secondRecovery;
+    while (true) {
+        auto token = preprocessor.next();
+        if (token.kind == TokenKind::EndOfFile)
+            break;
+
+        if (token.isRecovery()) {
+            if (!firstRecovery)
+                firstRecovery = token;
+            else if (!secondRecovery)
+                secondRecovery = token;
+        }
+
+        if (!openBracket && token.kind == TokenKind::OpenBracket)
+            openBracket = token;
+        else if (!dot && token.kind == TokenKind::Dot)
+            dot = token;
+    }
+
+    REQUIRE(firstRecovery);
+    REQUIRE(secondRecovery);
+    REQUIRE(openBracket);
+    REQUIRE(dot);
+
+    for (Token token : {firstRecovery, secondRecovery}) {
+        REQUIRE(!token.trivia().empty());
+        CHECK(token.trivia()[0].kind == TriviaKind::Directive);
+        CHECK(token.trivia()[0].syntax()->kind == SyntaxKind::MacroUsage);
+    }
+}
+
 TEST_CASE("Macro usage (simple)") {
     auto& text = "`define FOO 42\n`FOO";
     Token token = lexToken(text);
@@ -1239,9 +1364,10 @@ TEST_CASE("undef Directive") {
                  "`FOO";
     Token token = lexToken(text);
 
-    // The macro doesn't expand at all, so we go to end of file,
-    // and there should be the error from the attempted expansion
-    REQUIRE(token.kind == TokenKind::EndOfFile);
+    // The macro doesn't expand at all, so we insert a recovery token
+    // and there should be the error from the attempted expansion.
+    REQUIRE(token.kind == TokenKind::Identifier);
+    CHECK(token.isRecovery());
     CHECK(!diagnostics.empty());
 }
 
@@ -1262,7 +1388,8 @@ TEST_CASE("undefineall") {
                  "`FOO";
     Token token = lexToken(text);
 
-    REQUIRE(token.kind == TokenKind::EndOfFile);
+    REQUIRE(token.kind == TokenKind::Identifier);
+    CHECK(token.isRecovery());
     CHECK(!diagnostics.empty());
 }
 

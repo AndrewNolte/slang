@@ -519,6 +519,9 @@ SyntaxList<TMember> Parser::parseMemberList(TokenKind endKind, Token& endToken,
                     diag.addNote(diag::NoteLastBlockEnded, lastBlock.second.location());
                 }
             }
+            else if (getPP().hasRecentUnexpandedMacro()) {
+                errored = true;
+            }
 
             skipToken(errored ? std::nullopt : std::make_optional(diag::ExpectedMember));
             errored = true;

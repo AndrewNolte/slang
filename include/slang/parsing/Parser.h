@@ -198,6 +198,7 @@ private:
     syntax::SelectorSyntax* parseElementSelector();
     syntax::NameSyntax& parseName(bitmask<NameOptions> options);
     syntax::NameSyntax& parseNamePart(bitmask<NameOptions> options);
+    bool recoveryIsStandaloneListItem(TokenKind separatorKind, TokenKind closeKind);
     syntax::ExpressionSyntax& parseForeachArrayExpression();
     syntax::ParameterValueAssignmentSyntax* parseParameterValueAssignment();
     syntax::ArgumentListSyntax& parseArgumentList();

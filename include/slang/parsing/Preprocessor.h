@@ -64,6 +64,10 @@ struct SLANG_EXPORT PreprocessorOptions {
     /// A set of preprocessor directives to be ignored.
     flat_hash_set<std::string_view> ignoreDirectives;
 
+    /// If true, macro invocations are parsed but never expanded.
+    /// Unknown macros are silently ignored instead of producing errors.
+    bool dontExpandMacros = false;
+
     /// A list of mappings from file patterns to language keyword versions.
     std::vector<std::pair<std::string, KeywordVersion>> keywordMapping;
 
@@ -166,6 +170,9 @@ public:
     /// Gets the currently active source library, or nullptr if none has been set.
     const SourceLibrary* getCurrentLibrary() const;
 
+    /// Gets the preprocessor options.
+    const PreprocessorOptions& getOptions() const { return options; }
+
     /// Gets the source manager associated with the preprocessor.
     SourceManager& getSourceManager() const { return sourceManager; }
 
@@ -190,6 +197,14 @@ public:
     /// of the preprocessor (this calls into Lexer::splitTokens).
     void splitTokens(Token sourceToken, size_t offset, SmallVectorBase<Token>& results);
 
+    /// Returns true if an unexpanded macro was recently encountered,
+    /// indicating that subsequent parse errors are likely spurious.
+    bool hasRecentUnexpandedMacro() const { return recentUnexpandedMacro; }
+
+    /// Clears the unexpanded macro flag, typically after a semicolon
+    /// or end keyword delimits the affected region.
+    void clearRecentUnexpandedMacro() { recentUnexpandedMacro = false; }
+
 private:
     friend class MacroOpEvaluator;
 
@@ -205,7 +220,7 @@ private:
     Trivia handleIncludeDirective(Token directive);
     Trivia handleResetAllDirective(Token directive);
     Trivia handleDefineDirective(Token directive);
-    std::pair<Trivia, Trivia> handleMacroUsage(Token directive);
+    std::tuple<Trivia, bool, Trivia> handleMacroUsage(Token directive);
     Trivia handleIfDefDirective(Token directive, bool inverted, Token savedLastSeen);
     Trivia handleElsIfDirective(Token directive);
     Trivia handleElseDirective(Token directive);
@@ -338,7 +353,7 @@ private:
 
     // Macro handling methods
     MacroDef findMacro(Token directive);
-    std::pair<syntax::MacroActualArgumentListSyntax*, Trivia> handleTopLevelMacro(
+    std::tuple<syntax::MacroActualArgumentListSyntax*, bool, Trivia> handleTopLevelMacro(
         Token directive, const MacroDef& macro);
     bool expandMacro(MacroDef macro, MacroExpansion& expansion,
                      syntax::MacroActualArgumentListSyntax* actualArgs);
@@ -470,6 +485,14 @@ private:
     // the latest token pulled from a lexer
     Token currentToken;
 
+    // a token that was looked ahead while creating a recovery token; it needs to be
+    // returned after the recovery token itself is consumed by the caller.
+    Token tokenAfterRecovery;
+
+    // If the next token after a recovery macro starts on a new line, drop that
+    // newline because it belongs to the consumed macro invocation line.
+    bool stripLeadingEOLAfterRecovery = false;
+
     // the last token consumed before the currentToken; used to back up and
     // report errors in a different location in certain scenarios
     Token lastConsumed;
@@ -477,6 +500,7 @@ private:
     // Directives don't get handled when lexing within a macro body
     // (either define or usage).
     bool inMacroBody = false;
+    bool recentUnexpandedMacro = false;
 
     // Special handling for pulling directives when in an ifdef condition expr.
     bool inIfDefCondition = false;

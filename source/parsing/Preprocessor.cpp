@@ -435,10 +435,16 @@ Token Preprocessor::handleDirectives(Token token) {
                         trivia.push_back(handleDefineDirective(token));
                         break;
                     case SyntaxKind::MacroUsage: {
-                        auto [directive, extra] = handleMacroUsage(token);
+                        auto [directive, isRecovery, skipped] = handleMacroUsage(token);
                         trivia.push_back(directive);
-                        if (extra)
-                            trivia.push_back(extra);
+                        if (skipped)
+                            trivia.push_back(skipped);
+                        if (isRecovery) {
+                            tokenAfterRecovery = std::exchange(currentToken, Token());
+                            stripLeadingEOLAfterRecovery = true;
+                            return Token::createRecovery(alloc, trivia.copy(alloc),
+                                                         token.location());
+                        }
                         break;
                     }
                     case SyntaxKind::IfDefDirective:
@@ -545,9 +551,28 @@ Token Preprocessor::handleDirectives(Token token) {
 }
 
 Token Preprocessor::nextRaw() {
+    auto stripRecoveryEOL = [this](Token token) {
+        if (!stripLeadingEOLAfterRecovery)
+            return token;
+
+        stripLeadingEOLAfterRecovery = false;
+        if (!token)
+            return token;
+
+        auto nextTrivia = token.trivia();
+        if (!nextTrivia.empty() && nextTrivia[0].kind == TriviaKind::EndOfLine) {
+            return token.withTrivia(alloc,
+                                    std::span(nextTrivia.data() + 1, nextTrivia.size() - 1));
+        }
+        return token;
+    };
+
+    if (tokenAfterRecovery)
+        return stripRecoveryEOL(std::exchange(tokenAfterRecovery, Token()));
+
     // it's possible we have a token buffered from looking ahead when handling a directive
     if (currentToken)
-        return std::exchange(currentToken, Token());
+        return stripRecoveryEOL(std::exchange(currentToken, Token()));
 
     auto getNext = [&] {
         // if we are expandeding a macro we'll have tokens from that to return
@@ -565,7 +590,7 @@ Token Preprocessor::nextRaw() {
         return lexerStack.back()->lex(keywordVersionStack.back().version);
     };
 
-    auto token = getNext();
+    auto token = stripRecoveryEOL(getNext());
     if (token.kind != TokenKind::EndOfFile)
         return token;
 
@@ -859,12 +884,12 @@ Trivia Preprocessor::handleDefineDirective(Token directive) {
     return Trivia(TriviaKind::Directive, result);
 }
 
-std::pair<Trivia, Trivia> Preprocessor::handleMacroUsage(Token directive) {
+std::tuple<Trivia, bool, Trivia> Preprocessor::handleMacroUsage(Token directive) {
     auto macroDef = findMacro(directive);
 
     // delegate to a nested function to simplify the error handling paths
     inMacroBody = true;
-    auto [actualArgs, extraTrivia] = handleTopLevelMacro(directive, macroDef);
+    auto [actualArgs, isRecovery, skipped] = handleTopLevelMacro(directive, macroDef);
     inMacroBody = false;
 
     auto usageSyntax = alloc.emplace<MacroUsageSyntax>(directive, actualArgs);
@@ -876,7 +901,7 @@ std::pair<Trivia, Trivia> Preprocessor::handleMacroUsage(Token directive) {
         });
     }
 
-    return std::make_pair(Trivia(TriviaKind::Directive, usageSyntax), extraTrivia);
+    return {Trivia(TriviaKind::Directive, usageSyntax), isRecovery, skipped};
 }
 
 Trivia Preprocessor::handleIfDefDirective(Token directive, bool inverted, Token savedLastSeen) {
@@ -1548,8 +1573,14 @@ bool Preprocessor::peekSameLine() const {
     if (currentToken)
         return currentToken.isOnSameLine();
 
+    if (tokenAfterRecovery)
+        return tokenAfterRecovery.isOnSameLine();
+
     if (currentMacroToken)
         return currentMacroToken->isOnSameLine();
+
+    if (lexerStack.empty())
+        return false;
 
     return lexerStack.back()->isNextTokenOnSameLine();
 }
