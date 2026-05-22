@@ -47,7 +47,8 @@ SyntaxNode& Parser::parseGuess() {
     if (statement.kind == SyntaxKind::EmptyStatement &&
         statement.as<EmptyStatementSyntax>().semicolon.isMissing()) {
 
-        getDiagnostics().pop_back();
+        if (!getDiagnostics().empty())
+            getDiagnostics().pop_back();
         auto& unit = parseCompilationUnit();
 
         // If there's only one member, pull it out for convenience
@@ -69,6 +70,10 @@ ParserMetadata&& Parser::getMetadata() {
         meta.eofToken = consume();
 
     return std::move(meta);
+}
+
+bool Parser::recoveryIsStandaloneListItem(TokenKind separatorKind, TokenKind closeKind) {
+    return peek().isRecovery() && (peek(1).kind == separatorKind || peek(1).kind == closeKind);
 }
 
 Token Parser::parseLifetime() {
@@ -185,6 +190,9 @@ PortExpressionSyntax& Parser::parsePortExpression() {
 }
 
 NonAnsiPortSyntax& Parser::parseNonAnsiPort() {
+    if (peek().isRecovery())
+        return factory.emptyNonAnsiPort(consume());
+
     if (peek(TokenKind::Comma) || peek(TokenKind::CloseParenthesis))
         return factory.emptyNonAnsiPort(placeholderToken());
 
@@ -282,6 +290,15 @@ MemberSyntax& Parser::parseAnsiPort() {
 
         return factory.explicitAnsiPort(attributes, direction, dot, name, openParen, expr,
                                         expect(TokenKind::CloseParenthesis));
+    }
+
+    if (peek().isRecovery()) {
+        auto placeholder = consume();
+        auto& type = factory.implicitType(Token(), nullptr, placeholder);
+        auto& header = factory.variablePortHeader(Token(), direction, Token(), type);
+        auto& declarator = factory.declarator(
+            missingToken(TokenKind::Identifier, placeholder.location()), nullptr, nullptr);
+        return factory.implicitAnsiPort(attributes, header, declarator);
     }
 
     auto& header = parsePortHeader(Token(), direction);
@@ -990,6 +1007,22 @@ NetTypeDeclarationSyntax& Parser::parseNetTypeDecl(AttrList attributes) {
 }
 
 ParameterDeclarationBaseSyntax& Parser::parseParameterPort() {
+    if (peek().isRecovery()) {
+        auto placeholder = consume();
+        auto& type = factory.implicitType(Token(), nullptr, placeholder);
+        auto& declarator = factory.declarator(
+            missingToken(TokenKind::Identifier, placeholder.location()), nullptr, nullptr);
+
+        SmallVector<TokenOrSyntax, 2> decls;
+        decls.push_back(&declarator);
+
+        auto& result = factory.parameterDeclaration(Token(), type,
+                                                    SeparatedSyntaxList<DeclaratorSyntax>(alloc,
+                                                                                          decls));
+        result.setPreviewNode(alloc, std::exchange(previewNode, nullptr));
+        return result;
+    }
+
     ParameterDeclarationBaseSyntax* result;
     if (peek(TokenKind::ParameterKeyword) || peek(TokenKind::LocalParamKeyword))
         result = &parseParameterDecl(consume(), nullptr);
@@ -1093,6 +1126,9 @@ ParameterDeclarationBaseSyntax& Parser::parseParameterDecl(Token keyword, Token*
 
 PortConnectionSyntax& Parser::parsePortConnection() {
     auto attributes = parseAttributes();
+
+    if (recoveryIsStandaloneListItem(TokenKind::Comma, TokenKind::CloseParenthesis))
+        return factory.emptyPortConnection(attributes, consume());
 
     // Allow for empty port connections.
     if (peek(TokenKind::Comma) || peek(TokenKind::CloseParenthesis))

@@ -905,7 +905,11 @@ NameSyntax& Parser::parseNamePart(bitmask<NameOptions> options) {
 
     TokenKind next = peek().kind;
     Token identifier;
-    if (next == TokenKind::Identifier) {
+    if (peek().isRecovery()) {
+        identifier = consume();
+        return factory.emptyIdentifierName(identifier);
+    }
+    else if (next == TokenKind::Identifier) {
         identifier = consume();
     }
     else if (next != TokenKind::Dot && next != TokenKind::DoubleColon &&

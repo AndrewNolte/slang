@@ -64,6 +64,14 @@ SyntaxPrinter& SyntaxPrinter::print(Trivia trivia) {
 }
 
 SyntaxPrinter& SyntaxPrinter::print(Token token) {
+    if (token.isRecovery()) {
+        if (includeTrivia) {
+            for (const auto& trivia : token.trivia())
+                print(trivia);
+        }
+        return *this;
+    }
+
     auto location = token.location();
     bool excluded = !shouldPrint(location);
 

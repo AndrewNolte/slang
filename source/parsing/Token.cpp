@@ -761,6 +761,13 @@ Token Token::createMissing(BumpAllocator& alloc, TokenKind kind, SourceLocation 
     return result;
 }
 
+Token Token::createRecovery(BumpAllocator& alloc, const TriviaView& trivia,
+                            SourceLocation location) {
+    Token result(alloc, TokenKind::Identifier, trivia, ""sv, location);
+    result.numFlags.raw |= RecoveryFlag;
+    return result;
+}
+
 Token Token::createExpected(BumpAllocator& alloc, Diagnostics& diagnostics, Token actual,
                             TokenKind expected, Token lastConsumed, Token matchingDelim) {
     // Figure out the best place to report this error based on the current

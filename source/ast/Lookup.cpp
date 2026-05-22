@@ -126,6 +126,9 @@ struct NameComponents {
                 paramAssignments = cn.parameters;
                 break;
             }
+            case SyntaxKind::EmptyIdentifierName:
+                set(name.as<EmptyIdentifierNameSyntax>().placeholder);
+                break;
             case SyntaxKind::UnitScope:
             case SyntaxKind::RootScope:
             case SyntaxKind::LocalScope:
@@ -1158,6 +1161,7 @@ void Lookup::name(const NameSyntax& syntax, const ASTContext& context, bitmask<L
                 << syntax.getFirstToken().valueText();
             result.found = nullptr;
             return;
+        case SyntaxKind::EmptyIdentifierName:
         case SyntaxKind::LocalScope:
             // This can only happen in error scenarios, where the parser has
             // already issued a diagnostic.
@@ -2262,6 +2266,8 @@ void Lookup::qualified(const ScopedNameSyntax& syntax, const ASTContext& context
         case SyntaxKind::LocalScope:
             // This is only reachable in invalid code. An error has already been
             // reported so early out.
+            return;
+        case SyntaxKind::EmptyIdentifierName:
             return;
         case SyntaxKind::ArrayUniqueMethod:
         case SyntaxKind::ArrayAndMethod:

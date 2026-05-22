@@ -157,6 +157,23 @@ const MemberSyntax* parseClassMember(const std::string& text, SyntaxKind kind) {
     return classDecl.items[0];
 }
 
+static void checkMacroRecovery(Token token) {
+    CHECK(token.kind == TokenKind::Identifier);
+    CHECK(token.isRecovery());
+    CHECK(token.valueText().empty());
+    REQUIRE(!token.trivia().empty());
+    CHECK(token.trivia()[0].kind == TriviaKind::Directive);
+    REQUIRE(token.trivia()[0].syntax());
+    CHECK(token.trivia()[0].syntax()->kind == SyntaxKind::MacroUsage);
+}
+
+static void checkUnknownDirectiveDiagnostics(const Diagnostics& diagnostics,
+                                             size_t expectedCount = 1) {
+    REQUIRE(diagnostics.size() == expectedCount);
+    for (auto& diag : diagnostics)
+        CHECK(diag.code == diag::UnknownDirective);
+}
+
 TEST_CASE("Class members") {
     parseClassMember("function void blah(); endfunction", SyntaxKind::ClassMethodDeclaration);
     parseClassMember("virtual function void blah(); endfunction",
@@ -1743,4 +1760,146 @@ endmodule
 
     REQUIRE(diagnostics.size() == 1);
     CHECK(diagnostics[0].code == diag::TypoKeyword);
+}
+
+TEST_CASE("Undefined macro becomes recovery non-ansi port in comma list") {
+    auto tree = SyntaxTree::fromText(R"(
+module top (
+    a,
+    `PORT_ITEM,
+    b
+);
+endmodule
+)");
+
+    checkUnknownDirectiveDiagnostics(tree->diagnostics());
+
+    auto& module = tree->root().as<ModuleDeclarationSyntax>();
+    REQUIRE(module.header->ports);
+    REQUIRE(module.header->ports->kind == SyntaxKind::NonAnsiPortList);
+
+    auto& ports = module.header->ports->as<NonAnsiPortListSyntax>().ports;
+    REQUIRE(ports.size() == 3);
+    CHECK(ports[0]->kind == SyntaxKind::ImplicitNonAnsiPort);
+    CHECK(ports[2]->kind == SyntaxKind::ImplicitNonAnsiPort);
+
+    auto& recovery = ports[1]->as<EmptyNonAnsiPortSyntax>();
+    checkMacroRecovery(recovery.placeholder);
+}
+
+TEST_CASE("Undefined macro becomes recovery ansi port in comma list") {
+    auto tree = SyntaxTree::fromText(R"(
+module top (
+    input logic a,
+    `PORT_DECL(kind),
+    output logic b
+);
+endmodule
+)");
+
+    checkUnknownDirectiveDiagnostics(tree->diagnostics());
+
+    auto& module = tree->root().as<ModuleDeclarationSyntax>();
+    REQUIRE(module.header->ports);
+    REQUIRE(module.header->ports->kind == SyntaxKind::AnsiPortList);
+
+    auto& ports = module.header->ports->as<AnsiPortListSyntax>().ports;
+    REQUIRE(ports.size() == 3);
+    auto& recovery = ports[1]->as<ImplicitAnsiPortSyntax>();
+    REQUIRE(recovery.header->kind == SyntaxKind::VariablePortHeader);
+    auto& header = recovery.header->as<VariablePortHeaderSyntax>();
+    REQUIRE(header.dataType->kind == SyntaxKind::ImplicitType);
+    checkMacroRecovery(header.dataType->as<ImplicitTypeSyntax>().placeholder);
+}
+
+TEST_CASE("Undefined macro becomes recovery param assignment in comma list") {
+    auto tree = SyntaxTree::fromText(R"(
+module top;
+    submodule #(
+        `ARGS(foo),
+        .WIDTH(32)
+    ) dut ();
+endmodule
+)");
+
+    checkUnknownDirectiveDiagnostics(tree->diagnostics());
+
+    auto& module = tree->root().as<ModuleDeclarationSyntax>();
+    auto& inst = module.members[0]->as<HierarchyInstantiationSyntax>();
+    REQUIRE(inst.parameters);
+    auto& params = inst.parameters->parameters;
+    REQUIRE(params.size() == 2);
+
+    auto& recovery = params[0]->as<OrderedParamAssignmentSyntax>();
+    REQUIRE(recovery.expr->kind == SyntaxKind::EmptyIdentifierName);
+    checkMacroRecovery(recovery.expr->as<EmptyIdentifierNameSyntax>().placeholder);
+}
+
+TEST_CASE("Undefined macro becomes empty port connection in comma list") {
+    auto tree = SyntaxTree::fromText(R"(
+module top;
+    submodule dut (
+        `BUNDLE(a, b),
+        .x(x),
+        .y(y)
+    );
+endmodule
+)");
+
+    checkUnknownDirectiveDiagnostics(tree->diagnostics());
+
+    auto& module = tree->root().as<ModuleDeclarationSyntax>();
+    auto* inst = module.members[0]->as<HierarchyInstantiationSyntax>().instances[0];
+    auto& conns = inst->connections;
+    REQUIRE(conns.size() == 3);
+    auto& recovery = conns[0]->as<EmptyPortConnectionSyntax>();
+    checkMacroRecovery(recovery.placeholder);
+}
+
+TEST_CASE("Undefined macro becomes recovery identifier in expressions") {
+    auto tree = SyntaxTree::fromText(R"(
+module top;
+    assign dst = `P0 + rhs;
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+
+    checkUnknownDirectiveDiagnostics(compilation.getParseDiagnostics());
+
+    auto& module = tree->root().as<ModuleDeclarationSyntax>();
+    auto& assign = module.members[0]
+                       ->as<ContinuousAssignSyntax>()
+                       .assignments[0]
+                       ->as<BinaryExpressionSyntax>();
+    REQUIRE(assign.right->kind == SyntaxKind::AddExpression);
+
+    auto& add = assign.right->as<BinaryExpressionSyntax>();
+    REQUIRE(add.left->kind == SyntaxKind::EmptyIdentifierName);
+    checkMacroRecovery(add.left->as<EmptyIdentifierNameSyntax>().placeholder);
+    CHECK(add.right->as<IdentifierNameSyntax>().identifier.valueText() == "rhs");
+}
+
+TEST_CASE("Undefined macro before scope resolution recovers as scoped name") {
+    auto tree = SyntaxTree::fromText(R"(
+module top;
+    int field;
+    assign field = `PKG::field;
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    compilation.getAllDiagnostics();
+
+    auto& module = tree->root().as<ModuleDeclarationSyntax>();
+    auto& assign = module.members[1]
+                       ->as<ContinuousAssignSyntax>()
+                       .assignments[0]
+                       ->as<BinaryExpressionSyntax>();
+    REQUIRE(assign.right->kind == SyntaxKind::ScopedName);
+    auto& scoped = assign.right->as<ScopedNameSyntax>();
+    REQUIRE(scoped.left->kind == SyntaxKind::EmptyIdentifierName);
+    checkMacroRecovery(scoped.left->as<EmptyIdentifierNameSyntax>().placeholder);
 }
