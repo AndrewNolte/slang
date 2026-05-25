@@ -227,6 +227,29 @@ Token ParserBase::placeholderToken() {
     return Token(alloc, TokenKind::Placeholder, {}, {}, peek().location());
 }
 
+bool ParserBase::recoveryIsStandalone(Token recovery, Token next) {
+    if (next.kind == TokenKind::Semicolon || next.kind == TokenKind::EndOfFile)
+        return true;
+
+    // Two adjacent unknown macros — treat each as standalone rather than
+    // fabricating a single declaration whose type/name slots hold both
+    // macros as trivia. Downstream tools (e.g. formatters that preserve
+    // unexpanded macros) need each macro represented as its own member.
+    if (next.isRecovery())
+        return true;
+
+    if (!recovery.location() || !next.location())
+        return false;
+
+    auto& sourceManager = getPP().getSourceManager();
+    auto recoveryLoc = sourceManager.getFullyOriginalLoc(recovery.location());
+    auto nextLoc = sourceManager.getFullyOriginalLoc(next.location());
+    if (recoveryLoc.buffer() != nextLoc.buffer())
+        return false;
+
+    return sourceManager.getLineNumber(nextLoc) > sourceManager.getLineNumber(recoveryLoc);
+}
+
 Token ParserBase::getLastConsumed() const {
     return window.lastConsumed;
 }

@@ -1879,8 +1879,10 @@ TEST_CASE("Unknown function-like macro") {
 bar
 )";
 
+    // The unknown macro is dropped from the output but its line is preserved
+    // as blank so downstream line numbers match source.
     std::string result = preprocess(text);
-    CHECK(result == "\nbar\n");
+    CHECK(result == "\n\nbar\n");
     REQUIRE(diagnostics.size() == 1);
     CHECK(diagnostics[0].code == diag::UnknownDirective);
 }
@@ -2531,8 +2533,9 @@ TEST_CASE("Unknown directive or macro") {
 `unknown_pragma
 )";
 
+    // The unknown directive's line is preserved as blank in the output.
     auto result = preprocess(text);
-    CHECK(result == "\n");
+    CHECK(result == "\n\n");
 
     REQUIRE(diagnostics.size() == 1);
     CHECK(diagnostics.back().code == diag::UnknownDirective);

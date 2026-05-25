@@ -167,6 +167,19 @@ MemberSyntax* Parser::parseMember(SyntaxKind parentKind, bool& anyLocalModules) 
 
 MemberSyntax* Parser::parseMemberImpl(AttrList attributes, SyntaxKind parentKind,
                                       bool& anyLocalModules) {
+    if (peek().isRecovery() && recoveryIsStandalone(peek(), peek(1))) {
+        auto recovery = consume();
+        if (peek(TokenKind::Semicolon)) {
+            auto semi = consume();
+            SmallVector<Trivia, 4> trivia;
+            trivia.append_range(recovery.trivia());
+            trivia.append_range(semi.trivia());
+            semi = semi.withTrivia(alloc, trivia.copy(alloc));
+            return &factory.emptyMember(attributes, nullptr, semi);
+        }
+        return &factory.emptyMember(attributes, nullptr, recovery);
+    }
+
     if (isHierarchyInstantiation(/* requireName */ false))
         return &parseHierarchyInstantiation(attributes);
     if (isPortDeclaration(/* inStatement */ false))

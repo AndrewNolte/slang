@@ -489,10 +489,6 @@ private:
     // returned after the recovery token itself is consumed by the caller.
     Token tokenAfterRecovery;
 
-    // If the next token after a recovery macro starts on a new line, drop that
-    // newline because it belongs to the consumed macro invocation line.
-    bool stripLeadingEOLAfterRecovery = false;
-
     // the last token consumed before the currentToken; used to back up and
     // report errors in a different location in certain scenarios
     Token lastConsumed;

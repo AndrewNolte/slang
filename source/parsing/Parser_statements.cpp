@@ -23,6 +23,19 @@ StatementSyntax& Parser::parseStatement(bool allowEmpty, bool allowSuperNew) {
     }
 
     auto attributes = parseAttributes();
+    if (peek().isRecovery() && recoveryIsStandalone(peek(), peek(1))) {
+        auto recovery = consume();
+        if (peek(TokenKind::Semicolon)) {
+            auto semi = consume();
+            SmallVector<Trivia, 4> trivia;
+            trivia.append_range(recovery.trivia());
+            trivia.append_range(semi.trivia());
+            semi = semi.withTrivia(alloc, trivia.copy(alloc));
+            return factory.emptyStatement(label, attributes, semi);
+        }
+        return factory.emptyStatement(label, attributes, recovery);
+    }
+
     switch (peek().kind) {
         case TokenKind::UniqueKeyword:
         case TokenKind::Unique0Keyword:
@@ -670,7 +683,13 @@ SyntaxList<SyntaxNode> Parser::parseBlockItems(TokenKind endKind, Token& end, bo
         SyntaxNode* newNode = nullptr;
         bool isStmt = false;
 
-        if (isPortDeclaration(/* inStatement */ true)) {
+        if (peek().isRecovery() && recoveryIsStandalone(peek(), peek(1))) {
+            newNode = &parseStatement(/* allowEmpty */ true,
+                                      /* allowSuperNew */ inConstructor && !sawStatement);
+            isStmt = true;
+            sawStatement = true;
+        }
+        else if (isPortDeclaration(/* inStatement */ true)) {
             newNode = &parsePortDeclaration(parseAttributes());
         }
         else if (isVariableDeclaration()) {

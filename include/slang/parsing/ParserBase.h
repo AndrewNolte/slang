@@ -41,6 +41,7 @@ protected:
 
     Token missingToken(TokenKind kind, SourceLocation location);
     Token placeholderToken();
+    bool recoveryIsStandalone(Token recovery, Token next);
 
     Token getLastConsumed() const;
     bool haveDiagAtCurrentLoc();
