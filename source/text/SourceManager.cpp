@@ -26,6 +26,13 @@ namespace slang {
 
 static const fs::path emptyPath;
 
+static fs::path makeAbsoluteLexicalPath(const fs::path& path, std::error_code& ec) {
+    auto absPath = fs::absolute(path, ec);
+    if (ec)
+        return {};
+    return absPath.lexically_normal();
+}
+
 SourceManager::SourceManager() {
     // add a dummy entry to the start of the directory list so that our file IDs line up
     FileInfo file;
@@ -824,7 +831,7 @@ bool SourceManager::isCached(const fs::path& path) const {
     fs::path absPath;
     if (!disableProximatePaths) {
         std::error_code ec;
-        absPath = fs::weakly_canonical(path, ec);
+        absPath = makeAbsoluteLexicalPath(path, ec);
         if (ec)
             return false;
     }
@@ -844,7 +851,7 @@ SourceManager::BufferOrError SourceManager::openCached(const fs::path& fullPath,
     fs::path absPath;
     if (!disableProximatePaths) {
         std::error_code ec;
-        absPath = fs::weakly_canonical(fullPath, ec);
+        absPath = makeAbsoluteLexicalPath(fullPath, ec);
         if (ec)
             return nonstd::make_unexpected(ec);
     }
