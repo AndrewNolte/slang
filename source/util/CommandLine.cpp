@@ -19,6 +19,13 @@ namespace fs = std::filesystem;
 
 namespace slang {
 
+static fs::path makeAbsoluteLexicalPath(const fs::path& path, std::error_code& ec) {
+    auto absPath = fs::absolute(path, ec);
+    if (ec)
+        return {};
+    return absPath.lexically_normal();
+}
+
 void CommandLine::add(std::string_view name, std::optional<bool>& value, std::string_view desc,
                       bitmask<CommandLineFlags> flags) {
     addInternal(name, &value, desc, {}, flags);
@@ -711,7 +718,7 @@ void CommandLine::Option::set(std::string_view name, std::string_view value, boo
         !value.starts_with("..."sv)) {
 
         std::error_code ec;
-        fs::path path = fs::weakly_canonical(value, ec);
+        fs::path path = makeAbsoluteLexicalPath(value, ec);
         if (!ec) {
             pathMem = getU8Str(path);
             value = pathMem;

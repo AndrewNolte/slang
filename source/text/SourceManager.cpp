@@ -26,6 +26,21 @@ namespace slang {
 
 static const fs::path emptyPath;
 
+static fs::path makeAbsoluteLexicalPath(const fs::path& path, std::error_code& ec) {
+    auto absPath = fs::absolute(path, ec);
+    if (ec)
+        return {};
+    return absPath.lexically_normal();
+}
+
+static fs::path makeLookupPath(const fs::path& path, bool disableProximatePaths,
+                               std::error_code& ec) {
+    if (disableProximatePaths)
+        return path;
+
+    return makeAbsoluteLexicalPath(path, ec);
+}
+
 SourceManager::SourceManager() {
     // add a dummy entry to the start of the directory list so that our file IDs line up
     FileInfo file;
@@ -821,16 +836,10 @@ SourceBuffer SourceManager::createBufferEntry(std::shared_ptr<FileData> fd,
 }
 
 bool SourceManager::isCached(const fs::path& path) const {
-    fs::path absPath;
-    if (!disableProximatePaths) {
-        std::error_code ec;
-        absPath = fs::weakly_canonical(path, ec);
-        if (ec)
-            return false;
-    }
-    else {
-        absPath = path;
-    }
+    std::error_code ec;
+    fs::path absPath = makeLookupPath(path, disableProximatePaths, ec);
+    if (ec)
+        return false;
 
     std::shared_lock<std::shared_mutex> lock(mutex);
     auto it = lookupCache.find(getU8Str(absPath));
@@ -841,16 +850,10 @@ SourceManager::BufferOrError SourceManager::openCached(const fs::path& fullPath,
                                                        SourceLocation includedFrom,
                                                        const SourceLibrary* library,
                                                        uint64_t sortKey) {
-    fs::path absPath;
-    if (!disableProximatePaths) {
-        std::error_code ec;
-        absPath = fs::weakly_canonical(fullPath, ec);
-        if (ec)
-            return nonstd::make_unexpected(ec);
-    }
-    else {
-        absPath = fullPath;
-    }
+    std::error_code ec;
+    fs::path absPath = makeLookupPath(fullPath, disableProximatePaths, ec);
+    if (ec)
+        return nonstd::make_unexpected(ec);
 
     // first see if we have this file cached
     std::string pathStr = getU8Str(absPath);

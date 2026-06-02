@@ -15,6 +15,13 @@ namespace fs = std::filesystem;
 
 namespace slang {
 
+static fs::path makeAbsoluteLexicalPath(const fs::path& path, std::error_code& ec) {
+    auto absPath = fs::absolute(path, ec);
+    if (ec)
+        return {};
+    return absPath.lexically_normal();
+}
+
 static bool matches(std::string_view str, std::string_view pattern) {
     while (true) {
         // Empty pattern matches empty string.
@@ -75,8 +82,8 @@ static void iterDirectoriesRecursive(const fs::path& path, SmallVector<fs::path>
         fs::path canonical = fs::weakly_canonical(p, ec);
 
         if (!ec && visited.emplace(getU8Str(canonical)).second) {
-            iterDirectoriesRecursive(canonical, results, visited);
-            results.emplace_back(std::move(canonical));
+            iterDirectoriesRecursive(p, results, visited);
+            results.emplace_back(std::move(p));
         }
     }
 }
@@ -241,13 +248,13 @@ SLANG_EXPORT GlobRank svGlob(const fs::path& basePath, std::string_view pattern,
         rank = svGlobInternal(basePath, getU8Str(patternPath), mode, local, anyWildcards);
     }
 
-    // Results paths are always made canonical.
+    // Results paths are always made absolute, but symlink spelling is preserved.
     std::error_code localEc;
     results.reserve(local.size());
     for (auto& p : local) {
-        auto canonical = fs::weakly_canonical(p, localEc);
+        auto absolute = makeAbsoluteLexicalPath(p, localEc);
         if (!localEc)
-            results.emplace_back(std::move(canonical));
+            results.emplace_back(std::move(absolute));
     }
 
     if (!anyWildcards && rank == GlobRank::SimpleName) {
