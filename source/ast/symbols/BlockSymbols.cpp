@@ -913,12 +913,15 @@ GenerateBlockArraySymbol& GenerateBlockArraySymbol::fromSyntax(Compilation& comp
 
     result->entries = entries.copy(comp);
     if (entries.empty()) {
+        // Keep result->entries empty so indexed lookup (g[0], etc.) still reports
+        // the same out-of-range errors for zero-iteration arrays. The synthetic
+        // block is only exposed through generic member traversal; callers that
+        // don't want speculative semantic-checking contents can ignore members
+        // where isInstantiated() is false.
         createBlock(SVInt(32, 0, true), true);
     }
-    else {
-        for (auto entry : entries)
-            result->addMember(*entry);
-    }
+    for (auto entry : entries)
+        result->addMember(*entry);
 
     return *result;
 }

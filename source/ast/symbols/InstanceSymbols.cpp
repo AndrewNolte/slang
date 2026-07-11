@@ -505,7 +505,8 @@ void InstanceSymbol::fromSyntax(Compilation& comp, const HierarchyInstantiationS
 
     // If this instance is not instantiated then we'll just fill in a placeholder
     // and move on. This is likely inside an untaken generate branch.
-    if (flags.has(InstanceFlags::Uninstantiated)) {
+    if (flags.has(InstanceFlags::Uninstantiated) &&
+        !comp.hasFlag(CompilationFlags::CheckUninstantiated)) {
         UninstantiatedDefSymbol::fromSyntax(comp, syntax, context, results, implicitNets);
         return;
     }
@@ -967,11 +968,15 @@ InstanceBodySymbol& InstanceBodySymbol::fromDefinition(
 
     ParameterBuilder paramBuilder(*definition.getParentScope(), definition.name,
                                   definition.parameters);
-    paramBuilder.setForceInvalidValues(flags.has(InstanceFlags::Uninstantiated));
-    if (compilation.hasFlag(CompilationFlags::AllowInvalidTop) &&
-        instanceLoc == definition.location) {
+
+    if (flags.has(InstanceFlags::Uninstantiated)) {
+        paramBuilder.setForceInvalidValues(true);
+    }
+    else if (compilation.hasFlag(CompilationFlags::AllowInvalidTop) &&
+             instanceLoc == definition.location) {
         paramBuilder.setUseInvalidForMissing(true);
     }
+
     if (hierarchyOverrideNode)
         paramBuilder.setOverrides(hierarchyOverrideNode);
 
