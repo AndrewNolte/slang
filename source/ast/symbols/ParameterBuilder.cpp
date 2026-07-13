@@ -177,6 +177,18 @@ const ParameterSymbolBase& ParameterBuilder::createParam(
         }
 
         auto& tt = param->targetType;
+
+        // A pre-resolved type override takes precedence and is applied directly, since it has
+        // already been resolved and doesn't depend on any instance context. Localparams can't be
+        // overridden, so fall through to normal resolution for those.
+        if (auto it = resolvedOverrides.find(decl.name);
+            it != resolvedOverrides.end() && !param->isLocalParam()) {
+            SLANG_ASSERT(std::holds_alternative<const Type*>(it->second));
+            tt.addFlags(DeclaredTypeFlags::TypeOverridden);
+            tt.setType(*std::get<const Type*>(it->second));
+            newScope.addMember(*param);
+            return *param;
+        }
         if (newInitializer) {
             // If this is a NameSyntax, the parser didn't know we were assigning to
             // a type parameter, so fix it up into a NamedTypeSyntax to get a type from it.
@@ -274,6 +286,15 @@ const ParameterSymbolBase& ParameterBuilder::createParam(
         }
 
         newScope.addMember(*param);
+
+        // A pre-resolved value override takes precedence and is applied directly, since it has
+        // already been evaluated and doesn't depend on any instance context.
+        if (auto it = resolvedOverrides.find(decl.name);
+            it != resolvedOverrides.end() && !param->isLocalParam()) {
+            SLANG_ASSERT(std::holds_alternative<ConstantValue>(it->second));
+            param->setValue(comp, std::get<ConstantValue>(it->second), /* needsCoercion */ true);
+            return *param;
+        }
 
         // If there is an override node, see if this parameter is in it.
         // Note that we ignore the override node if this is from a configuration,
