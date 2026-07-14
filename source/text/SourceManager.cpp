@@ -669,6 +669,71 @@ size_t SourceManager::getMemoryUsage() const {
     return total;
 }
 
+std::vector<std::shared_ptr<void>> SourceManager::retainBuffers(
+    std::span<const BufferID> ids) const {
+    std::shared_lock<std::shared_mutex> lock(mutex);
+    std::vector<std::shared_ptr<void>> result;
+    result.reserve(ids.size());
+    for (auto id : ids) {
+        auto info = getFileInfo(id, lock);
+        if (info && info->data)
+            result.push_back(info->data);
+    }
+    return result;
+}
+
+SourceBuffer SourceManager::replaceBufferImpl(FileInfo* oldInfo, SmallVector<char>&& buffer,
+                                              std::unique_lock<std::shared_mutex>& lock) {
+    auto oldData = oldInfo->data;
+
+    // Mark old data as stale, remove reference
+    oldInfo->data.reset();
+    oldData->isStale = true;
+
+    // Create new FileData with the new buffer content
+    auto newData = std::make_shared<FileData>(oldData->directory, oldData->name, std::move(buffer),
+                                              oldData->fullPath);
+
+    // Update lookupCache to point to new data
+    lookupCache.insert_or_assign(getU8Str(newData->fullPath),
+                                 std::pair{newData, std::error_code{}});
+
+    // Create a new FileInfo entry with new data (don't modify old entry!)
+    // Old data should be freed if nothing more points to it.
+    return createBufferEntry(newData, oldInfo->includedFrom, oldInfo->library, oldInfo->sortKey,
+                             lock);
+}
+
+SourceBuffer SourceManager::replaceBuffer(BufferID id, SmallVector<char>&& buffer) {
+    std::unique_lock<std::shared_mutex> lock(mutex);
+    auto oldInfo = getFileInfo(id, lock);
+    SLANG_ASSERT(oldInfo && oldInfo->data);
+    return replaceBufferImpl(oldInfo, std::move(buffer), lock);
+}
+
+SourceManager::BufferOrError SourceManager::reloadBuffer(BufferID id) {
+    std::unique_lock<std::shared_mutex> lock(mutex);
+
+    auto oldInfo = getFileInfo(id, lock);
+    if (!oldInfo || !oldInfo->data)
+        return nonstd::make_unexpected(make_error_code(std::errc::invalid_argument));
+
+    // Read from disk (we need the lock to safely access oldInfo->data->fullPath)
+    SmallVector<char> buffer;
+    if (std::error_code ec = OS::readFile(oldInfo->data->fullPath, buffer))
+        return nonstd::make_unexpected(ec);
+
+    return replaceBufferImpl(oldInfo, std::move(buffer), lock);
+}
+
+bool SourceManager::isLatestData(BufferID id) const {
+    std::shared_lock<std::shared_mutex> lock(mutex);
+    auto info = getFileInfo(id, lock);
+    if (!info || !info->data)
+        return false;
+    return !info->data->isStale;
+}
+
 template<IsLock TLock>
 SourceManager::FileInfo* SourceManager::getFileInfo(BufferID buffer, TLock&) {
     if (!buffer || buffer.getId() >= bufferEntries.size())
@@ -685,7 +750,8 @@ const SourceManager::FileInfo* SourceManager::getFileInfo(BufferID buffer, TLock
     return std::get_if<FileInfo>(&bufferEntries[buffer.getId()]);
 }
 
-SourceBuffer SourceManager::createBufferEntry(FileData* fd, SourceLocation includedFrom,
+SourceBuffer SourceManager::createBufferEntry(std::shared_ptr<FileData> fd,
+                                              SourceLocation includedFrom,
                                               const SourceLibrary* library, uint64_t sortKey,
                                               std::unique_lock<std::shared_mutex>&) {
     SLANG_ASSERT(fd);
@@ -696,8 +762,9 @@ SourceBuffer SourceManager::createBufferEntry(FileData* fd, SourceLocation inclu
         sortKey = (uint64_t)bufferEntries.size() << 32;
 
     bufferEntries.emplace_back(FileInfo(fd, library, includedFrom, sortKey));
-    return SourceBuffer{std::string_view(fd->mem.data(), fd->mem.size()), library,
-                        BufferID((uint32_t)(bufferEntries.size() - 1), fd->name)};
+    BufferID newBufferId((uint32_t)(bufferEntries.size() - 1), fd->name);
+
+    return SourceBuffer{std::string_view(fd->mem.data(), fd->mem.size()), library, newBufferId};
 }
 
 bool SourceManager::isCached(const fs::path& path) const {
@@ -743,7 +810,7 @@ SourceManager::BufferOrError SourceManager::openCached(const fs::path& fullPath,
                 return nonstd::make_unexpected(ec);
 
             SLANG_ASSERT(fd);
-            return createBufferEntry(fd.get(), includedFrom, library, sortKey, lock);
+            return createBufferEntry(fd, includedFrom, library, sortKey, lock);
         }
     }
 
@@ -776,7 +843,7 @@ SourceBuffer SourceManager::cacheBuffer(fs::path&& path, std::string&& pathStr,
     std::unique_lock<std::shared_mutex> lock(mutex);
 
     auto directory = &*directories.insert(path.parent_path()).first;
-    auto fd = std::make_unique<FileData>(directory, std::move(name), std::move(buffer),
+    auto fd = std::make_shared<FileData>(directory, std::move(name), std::move(buffer),
                                          std::move(path));
 
     // Note: it's possible that insertion here fails due to another thread
@@ -786,9 +853,7 @@ SourceBuffer SourceManager::cacheBuffer(fs::path&& path, std::string&& pathStr,
     // we already loaded (just like we had gotten a hit on the cache in the
     // first place).
     auto [it, inserted] = lookupCache.emplace(pathStr, std::pair{std::move(fd), std::error_code{}});
-
-    FileData* fdPtr = it->second.first.get();
-    return createBufferEntry(fdPtr, includedFrom, library, sortKey, lock);
+    return createBufferEntry(it->second.first, includedFrom, library, sortKey, lock);
 }
 
 template<IsLock TLock>
