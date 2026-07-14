@@ -299,6 +299,24 @@ public:
     /// source manager.
     std::vector<BufferID> getAllBuffers() const;
 
+    /// Returns opaque handles that keep the buffer data alive.
+    /// Use this to retain buffer data for a compilation that needs to keep this data alive.
+    std::vector<std::shared_ptr<void>> retainBuffers(std::span<const BufferID> ids) const;
+
+    /// Replaces the buffer data for an existing BufferID with new content.
+    /// Creates a new FileInfo entry with new data and returns a new BufferID.
+    /// The old BufferID continues to point to the old (now stale) data, which will
+    /// be freed once no other references exist.
+    SourceBuffer replaceBuffer(BufferID id, SmallVector<char>&& buffer);
+
+    /// Re-reads a buffer from disk, updating the cache and marking old data as stale.
+    /// Returns the new SourceBuffer with fresh content, or an error if the read fails.
+    [[nodiscard]]
+    BufferOrError reloadBuffer(BufferID id);
+
+    /// Determines whether the given BufferID points to non-stale data.
+    bool isLatestData(BufferID id) const;
+
     /// Returns the total bytes consumed by all loaded source files:
     /// raw file content plus any cached line-offset tables.
     size_t getMemoryUsage() const;
@@ -327,6 +345,7 @@ private:
         std::vector<size_t> lineOffsets;              // cache of compute line offsets
         const std::filesystem::path* const directory; // directory in which the file exists
         const std::filesystem::path fullPath;         // full path to the file
+        bool isStale = false; // Is pointing at stale data (path has newer contents elsewhere)
 
         FileData(const std::filesystem::path* directory, std::string name, SmallVector<char>&& data,
                  std::filesystem::path fullPath) :
@@ -337,7 +356,7 @@ private:
     // Stores a pointer to file data along with information about where we included it.
     // There can potentially be many of these for a given file.
     struct FileInfo {
-        FileData* data = nullptr;
+        std::shared_ptr<FileData> data;
         const SourceLibrary* library = nullptr;
         SourceLocation includedFrom;
         uint64_t sortKey = 0;
@@ -346,9 +365,9 @@ private:
 
         FileInfo() = default;
 
-        FileInfo(FileData* data, const SourceLibrary* library, SourceLocation includedFrom,
-                 uint64_t sortKey) :
-            data(data), library(library), includedFrom(includedFrom), sortKey(sortKey),
+        FileInfo(std::shared_ptr<FileData> data, const SourceLibrary* library,
+                 SourceLocation includedFrom, uint64_t sortKey) :
+            data(std::move(data)), library(library), includedFrom(includedFrom), sortKey(sortKey),
             bufferKind(includedFrom.valid() ? BufferKind::IncludeFile : BufferKind::DesignFile) {}
 
         // Returns a pointer to the LineDirectiveInfo for the nearest enclosing
@@ -416,7 +435,7 @@ private:
     std::vector<std::variant<FileInfo, ExpansionInfo>> bufferEntries;
 
     // cache for file lookups; this holds on to the actual file data
-    flat_hash_map<std::string, std::pair<std::unique_ptr<FileData>, std::error_code>> lookupCache;
+    flat_hash_map<std::string, std::pair<std::shared_ptr<FileData>, std::error_code>> lookupCache;
 
     // directories for system and user includes
     std::vector<std::filesystem::path> systemDirectories;
@@ -445,8 +464,11 @@ private:
     template<IsLock TLock>
     const FileInfo* getFileInfo(BufferID buffer, TLock& lock) const;
 
-    SourceBuffer createBufferEntry(FileData* fd, SourceLocation includedFrom,
+    SourceBuffer createBufferEntry(std::shared_ptr<FileData> fd, SourceLocation includedFrom,
                                    const SourceLibrary* library, uint64_t sortKey,
+                                   std::unique_lock<std::shared_mutex>& lock);
+
+    SourceBuffer replaceBufferImpl(FileInfo* oldInfo, SmallVector<char>&& buffer,
                                    std::unique_lock<std::shared_mutex>& lock);
 
     BufferOrError openCached(const std::filesystem::path& fullPath, SourceLocation includedFrom,
