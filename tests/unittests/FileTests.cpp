@@ -226,3 +226,88 @@ TEST_CASE("Display column with tabs") {
     // Tab at position 2 expands to next 8-boundary, which is column 9
     CHECK(manager.getDisplayColumnNumber(loc3) == 9);
 }
+
+TEST_CASE("Source location lookup by line column") {
+    SourceManager manager;
+    std::string_view text = "alpha\nbeta\ngamma";
+    auto buffer = manager.assignText("lookup.sv", text);
+    REQUIRE(buffer);
+
+    for (size_t offset = 0; offset <= text.size(); offset++) {
+        SourceLocation fromOffset(buffer.id, offset);
+        auto fromLineCol = manager.getSourceLocation(buffer.id, manager.getLineNumber(fromOffset),
+                                                     manager.getColumnNumber(fromOffset));
+        REQUIRE(fromLineCol);
+        CHECK(*fromLineCol == fromOffset);
+    }
+
+    auto loc = manager.getSourceLocation(buffer.id, 2, 3);
+    REQUIRE(loc);
+    CHECK(*loc == SourceLocation(buffer.id, 8));
+    CHECK(manager.getLineNumber(*loc) == 2);
+    CHECK(manager.getColumnNumber(*loc) == 3);
+
+    loc = manager.getSourceLocation(buffer.id, 1, 6);
+    REQUIRE(loc);
+    CHECK(*loc == SourceLocation(buffer.id, 5));
+    CHECK(manager.getLineNumber(*loc) == 1);
+    CHECK(manager.getColumnNumber(*loc) == 6);
+
+    loc = manager.getSourceLocation(buffer.id, 3, 6);
+    REQUIRE(loc);
+    CHECK(*loc == SourceLocation(buffer.id, text.size()));
+
+    CHECK(!manager.getSourceLocation(buffer.id, 1, 7));
+    CHECK(!manager.getSourceLocation(buffer.id, 3, 7));
+    CHECK(!manager.getSourceLocation(buffer.id, 0, 1));
+    CHECK(!manager.getSourceLocation(buffer.id, 4, 1));
+    CHECK(!manager.getSourceLocation(BufferID::getPlaceholder(), 1, 1));
+}
+
+TEST_CASE("Source text helpers") {
+    SourceManager manager;
+    auto buffer = manager.assignText("lines.sv", "first\nsecond\nthird");
+    REQUIRE(buffer);
+
+    auto start = manager.getSourceLocation(buffer.id, 2, 1);
+    auto end = manager.getSourceLocation(buffer.id, 2, 7);
+    REQUIRE(start);
+    REQUIRE(end);
+
+    CHECK(manager.getSourceText(SourceRange(*start, *end)) == "second");
+    CHECK(manager.getSourceText(SourceRange(*end, *start)).empty());
+    CHECK(manager.getSourceText(SourceRange(*start, SourceLocation(buffer.id, 100))).empty());
+    CHECK(manager.getSourceText(SourceRange(*start, SourceLocation(BufferID::getPlaceholder(), 0)))
+              .empty());
+}
+
+TEST_CASE("Compute line offsets from string view") {
+    std::vector<size_t> offsets;
+    SourceManager::computeLineOffsets("a\nb\r\nc\rd", offsets);
+
+    CHECK(offsets == std::vector<size_t>{0, 2, 5, 7});
+}
+
+TEST_CASE("Fully expanded range follows regular and argument macro expansions") {
+    SourceManager manager;
+    auto defBuffer = manager.assignText("defs.svh", "`define M(arg) $info(arg, arg)\n");
+    auto useBuffer = manager.assignText("use.sv", "`M(1 + 2)\n");
+    REQUIRE(defBuffer);
+    REQUIRE(useBuffer);
+
+    SourceRange usageRange(SourceLocation(useBuffer.id, 0), SourceLocation(useBuffer.id, 9));
+    auto bodyLoc = manager.createExpansionLoc(SourceLocation(defBuffer.id, 15), usageRange, "M");
+
+    CHECK(manager.getFullyExpandedRange(SourceRange(bodyLoc, bodyLoc + 5)).start() ==
+          usageRange.start());
+    CHECK(manager.getFullyExpandedRange(SourceRange(bodyLoc, bodyLoc + 5)).end() ==
+          usageRange.end());
+
+    SourceRange firstArgUseInExpansion(bodyLoc + 6, bodyLoc + 9);
+    auto argLoc = manager.createArgExpansionLoc(SourceLocation(useBuffer.id, 3),
+                                                firstArgUseInExpansion);
+    auto expandedRange = manager.getFullyExpandedRange(SourceRange(argLoc, argLoc + 5));
+
+    CHECK(expandedRange.start() == usageRange.start());
+    CHECK(expandedRange.end() == usageRange.end());
+}
