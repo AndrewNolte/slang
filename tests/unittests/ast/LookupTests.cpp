@@ -1929,12 +1929,14 @@ endmodule
 
     auto diags = compilation.getAllDiagnostics().filter(
         {diag::StaticInitOrder, diag::StaticInitValue});
-    REQUIRE(diags.size() == 5);
+    REQUIRE(diags.size() == 7);
     CHECK(diags[0].code == diag::Redefinition);
     CHECK(diags[1].code == diag::UnknownPackage);
     CHECK(diags[2].code == diag::UnknownPackageMember);
-    CHECK(diags[3].code == diag::ImportNameCollision);
-    CHECK(diags[4].code == diag::UnknownPackageMember);
+    CHECK(diags[3].code == diag::PackageExportNotImported);
+    CHECK(diags[4].code == diag::ImportNameCollision);
+    CHECK(diags[5].code == diag::ImportNameCollision);
+    CHECK(diags[6].code == diag::UnknownPackageMember);
 }
 
 TEST_CASE("Imported names not visible to importers without export -- GH #1877") {
@@ -2017,6 +2019,167 @@ endmodule
     auto& diags = compilation.getAllDiagnostics();
     REQUIRE(diags.size() == 1);
     CHECK(diags[0].code == diag::AmbiguousWildcardImport);
+}
+
+TEST_CASE("Explicit package re-export of imported class") {
+    auto tree = SyntaxTree::fromText(R"(
+package base_pkg;
+    virtual class BaseTxnT;
+    endclass
+endpackage
+
+package model_pkg;
+    import base_pkg::BaseTxnT;
+    export base_pkg::BaseTxnT;
+
+    virtual class RoutedTxnT extends BaseTxnT;
+    endclass
+endpackage
+
+package export_pkg;
+    import model_pkg::RoutedTxnT;
+    export model_pkg::RoutedTxnT;
+endpackage
+
+package indirect_pkg;
+    import export_pkg::RoutedTxnT;
+    export export_pkg::RoutedTxnT;
+endpackage
+
+package user_pkg;
+    import indirect_pkg::RoutedTxnT;
+
+    class UserTxnT extends RoutedTxnT;
+    endclass
+endpackage
+
+module top;
+    import user_pkg::UserTxnT;
+    UserTxnT t;
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+}
+
+TEST_CASE("Explicit export of symbol not imported via a matching wildcard") {
+    // The exported name exists in the target package but is neither explicitly
+    // imported nor wildcard imported from that package into the exporting one, so
+    // the export is invalid. The wildcard import of an unrelated package exercises
+    // the package-name-mismatch skip in the import search.
+    auto tree = SyntaxTree::fromText(R"(
+package p;
+    int x;
+endpackage
+
+package q;
+    int z;
+endpackage
+
+package m;
+    import q::*;
+    export p::x;
+endpackage
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+
+    auto& diags = compilation.getAllDiagnostics();
+    REQUIRE(diags.size() == 1);
+    CHECK(diags[0].code == diag::PackageExportNotImported);
+}
+
+TEST_CASE("Explicit exports of the same name from different packages collide") {
+    auto tree = SyntaxTree::fromText(R"(
+package a;
+    int x;
+endpackage
+
+package b;
+    int x;
+endpackage
+
+package m;
+    import a::*;
+    import b::*;
+    export a::x;
+    export b::x;
+endpackage
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+
+    auto& diags = compilation.getAllDiagnostics();
+    REQUIRE(diags.size() == 1);
+    CHECK(diags[0].code == diag::ImportNameCollision);
+}
+
+TEST_CASE("Star export doesn't re-export names owned by an unexported package") {
+    // p1::x is wildcard imported into m and referenced, but only p2 is star
+    // exported, so importing m::x from another package must fail.
+    auto tree = SyntaxTree::fromText(R"(
+package p1;
+    int x;
+endpackage
+
+package p2;
+    int y;
+endpackage
+
+package m;
+    import p1::*;
+    import p2::*;
+    export p2::*;
+    int z = x;
+endpackage
+
+package user;
+    import m::x;
+endpackage
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+
+    auto diags = compilation.getAllDiagnostics().filter({diag::StaticInitValue});
+    REQUIRE(diags.size() == 1);
+    CHECK(diags[0].code == diag::UnknownPackageMember);
+}
+
+TEST_CASE("Star export re-exports a wildcard-imported enum value") {
+    // The exported symbol (an enum value) is nested inside the enum type rather
+    // than directly in the package, so resolving its owning package requires
+    // walking up more than one scope.
+    auto tree = SyntaxTree::fromText(R"(
+package p1;
+    enum { AVAL, BVAL } e1;
+endpackage
+
+package m;
+    import p1::*;
+    export p1::*;
+    int z = AVAL;
+endpackage
+
+package user;
+    import m::AVAL;
+    int w = AVAL;
+endpackage
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+
+    auto diags = compilation.getAllDiagnostics().filter({diag::StaticInitValue});
+    REQUIRE(diags.empty());
+
+    auto p1Aval = compilation.getPackage("p1")->find("AVAL");
+    REQUIRE(p1Aval);
+    CHECK(compilation.getPackage("m")->findForImport("AVAL") == p1Aval);
 }
 
 TEST_CASE("Hierarchical lookup of type name") {
