@@ -50,7 +50,6 @@ public:
     const NetType& defaultNetType;
     std::optional<TimeScale> timeScale;
     VariableLifetime defaultLifetime;
-    std::span<const syntax::PackageImportItemSyntax* const> exportDecls;
     bool hasExportAll = false;
 
     PackageSymbol(Compilation& compilation, std::string_view name, SourceLocation loc,
@@ -73,9 +72,31 @@ public:
     static bool isKind(SymbolKind kind) { return kind == SymbolKind::Package; }
 
 private:
-    // Checks whether the given symbol, which was imported into this package from
-    // another package, is re-exported by this package via an export declaration.
-    bool isExported(const Symbol& symbol) const;
+    struct ExportData {
+        // All `export p::x` and `export p::*` declaration items in source order.
+        std::span<const syntax::PackageImportItemSyntax* const> decls;
+
+        // Explicit exports that have been validated, keyed by exported member name.
+        SymbolMap* explicitMap = nullptr;
+
+        // Validated star exports, keyed by exported package name.
+        SymbolMap* starMap = nullptr;
+
+        // Tracks whether the corresponding subset of decls has been validated.
+        mutable bool explicitResolved = false;
+        mutable bool starResolved = false;
+    };
+
+    // Validates the explicit / star export declarations respectively, populating
+    // the corresponding map. Each is idempotent and does nothing if there are no
+    // such exports.
+    void resolveExplicitExports() const;
+    void resolveStarExports() const;
+    bool exportsPackage(std::string_view packageName) const;
+
+    // Optional package export state, present only when the package has explicit
+    // or star export declaration items.
+    ExportData* exportData = nullptr;
 };
 
 /// Represents the entirety of a design, along with all contained compilation units.

@@ -1929,12 +1929,14 @@ endmodule
 
     auto diags = compilation.getAllDiagnostics().filter(
         {diag::StaticInitOrder, diag::StaticInitValue});
-    REQUIRE(diags.size() == 5);
+    REQUIRE(diags.size() == 7);
     CHECK(diags[0].code == diag::Redefinition);
     CHECK(diags[1].code == diag::UnknownPackage);
     CHECK(diags[2].code == diag::UnknownPackageMember);
-    CHECK(diags[3].code == diag::ImportNameCollision);
-    CHECK(diags[4].code == diag::UnknownPackageMember);
+    CHECK(diags[3].code == diag::PackageExportNotImported);
+    CHECK(diags[4].code == diag::ImportNameCollision);
+    CHECK(diags[5].code == diag::ImportNameCollision);
+    CHECK(diags[6].code == diag::UnknownPackageMember);
 }
 
 TEST_CASE("Imported names not visible to importers without export -- GH #1877") {
@@ -2017,6 +2019,49 @@ endmodule
     auto& diags = compilation.getAllDiagnostics();
     REQUIRE(diags.size() == 1);
     CHECK(diags[0].code == diag::AmbiguousWildcardImport);
+}
+
+TEST_CASE("Explicit package re-export of imported class") {
+    auto tree = SyntaxTree::fromText(R"(
+package base_pkg;
+    virtual class BaseTxnT;
+    endclass
+endpackage
+
+package model_pkg;
+    import base_pkg::BaseTxnT;
+    export base_pkg::BaseTxnT;
+
+    virtual class RoutedTxnT extends BaseTxnT;
+    endclass
+endpackage
+
+package export_pkg;
+    import model_pkg::RoutedTxnT;
+    export model_pkg::RoutedTxnT;
+endpackage
+
+package indirect_pkg;
+    import export_pkg::RoutedTxnT;
+    export export_pkg::RoutedTxnT;
+endpackage
+
+package user_pkg;
+    import indirect_pkg::RoutedTxnT;
+
+    class UserTxnT extends RoutedTxnT;
+    endclass
+endpackage
+
+module top;
+    import user_pkg::UserTxnT;
+    UserTxnT t;
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
 }
 
 TEST_CASE("Hierarchical lookup of type name") {
