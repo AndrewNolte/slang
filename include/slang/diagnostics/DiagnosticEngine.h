@@ -29,16 +29,30 @@ class DiagnosticClient;
 class SourceManager;
 class WaiverManager;
 
-struct SLANG_EXPORT ReportedDiagnostic {
+/// Data shared by primary diagnostics and their associated notes after preparation for reporting.
+struct SLANG_EXPORT ReportedDiagnosticInfo {
     const Diagnostic& originalDiagnostic;
-    std::span<const SourceLocation> expansionLocs;
+    SmallVector<SourceLocation> expansionLocs;
     std::span<const SourceRange> ranges;
     SourceLocation location;
-    std::string_view formattedMessage;
-    DiagnosticSeverity severity = DiagnosticSeverity::Ignored;
+    std::string formattedMessage;
     bool shouldShowIncludeStack = false;
 
-    ReportedDiagnostic(const Diagnostic& original) : originalDiagnostic(original) {}
+    ReportedDiagnosticInfo(const Diagnostic& original) : originalDiagnostic(original) {}
+};
+
+/// A note associated with a ReportedDiagnostic.
+struct SLANG_EXPORT ReportedNote : ReportedDiagnosticInfo {
+    ReportedNote(ReportedDiagnosticInfo&& info) : ReportedDiagnosticInfo(std::move(info)) {}
+};
+
+/// A primary diagnostic prepared for reporting to a DiagnosticClient.
+struct SLANG_EXPORT ReportedDiagnostic : ReportedDiagnosticInfo {
+    std::vector<ReportedNote> notes;
+    DiagnosticSeverity severity;
+
+    ReportedDiagnostic(ReportedDiagnosticInfo&& info, DiagnosticSeverity severity) :
+        ReportedDiagnosticInfo(std::move(info)), severity(severity) {}
 };
 
 /// The DiagnosticEngine is the central point for controlling how diagnostics are
@@ -300,7 +314,9 @@ private:
     std::optional<DiagnosticSeverity> findPerBufferSeverity(DiagCode code, SourceLocation location,
                                                             bool& overrideWarnAsError) const;
 
-    bool issueImpl(const Diagnostic& diagnostic, DiagnosticSeverity severity);
+    // Resolves and formats a diagnostic for reporting. Returns nullopt if the diagnostic is
+    // suppressed by a path filter or waiver. Note diagnostics are never suppressed here.
+    std::optional<ReportedDiagnosticInfo> getReportedDiag(const Diagnostic& diagnostic);
 
     template<typename TDirective>
     void setMappingsFromPragmasImpl(BufferID buffer, std::span<const TDirective> directives,
