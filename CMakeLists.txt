@@ -94,6 +94,8 @@ option(SLANG_USE_SYSTEM_BOOST
 option(SLANG_USE_SYSTEM_TOMLPLUSPLUS
        "Use a system-installed tomlplusplus library instead of FetchContent"
        OFF)
+option(SLANG_USE_SSH_FOR_DEPS
+       "Use SSH instead of HTTPS to fetch GitHub dependencies" OFF)
 
 set(SLANG_LIB_NAME
     "svlang"
