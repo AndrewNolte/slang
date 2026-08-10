@@ -10,6 +10,6 @@
 
 module m;
     `MAKE_FUNCTION(item, _result) // unrelated trailing text
-//                 ^^^^^^^^^^^ UndeclaredIdentifier use of undeclared identifier 'item_result'
-//                           ^^^^^^^^^ UndeclaredIdentifier use of undeclared identifier 'item_type'
+//  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ UndeclaredIdentifier use of undeclared identifier 'item_result'
+//                 ^ UndeclaredIdentifier use of undeclared identifier 'item_type'
 endmodule
