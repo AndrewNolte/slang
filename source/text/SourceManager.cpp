@@ -57,6 +57,11 @@ std::error_code SourceManager::addUserDirectories(std::string_view pattern) {
     return ec;
 }
 
+size_t SourceManager::getRawLineNumber(SourceLocation location) const {
+    std::shared_lock<std::shared_mutex> lock(mutex);
+    return getRawLineNumber(location, lock);
+}
+
 size_t SourceManager::getLineNumber(SourceLocation location) const {
     std::shared_lock<std::shared_mutex> lock(mutex);
     SourceLocation fileLocation = getFullyExpandedLocImpl(location, lock);
@@ -71,6 +76,16 @@ size_t SourceManager::getLineNumber(SourceLocation location) const {
         return rawLineNumber;
     else
         return lineDirective->lineOfDirective + (rawLineNumber - lineDirective->lineInFile) - 1;
+}
+
+std::vector<SourceManager::LineDirectiveInfo> SourceManager::getLineDirectives(
+    BufferID buffer) const {
+    std::shared_lock<std::shared_mutex> lock(mutex);
+    auto info = getFileInfo(buffer, lock);
+    if (!info)
+        return {};
+
+    return info->lineDirectives;
 }
 
 size_t SourceManager::getColumnNumber(SourceLocation location) const {
