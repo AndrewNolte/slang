@@ -264,6 +264,44 @@ TEST_CASE("Source location lookup by line column") {
     CHECK(!manager.getSourceLocation(BufferID::getPlaceholder(), 1, 1));
 }
 
+TEST_CASE("Raw and mapped source locations") {
+    SourceManager manager;
+    manager.setDisableProximatePaths(true);
+    auto buffer = manager.assignText("source.sv", "first\n`line\nthird\n`line\nfifth\n");
+    REQUIRE(buffer);
+
+    auto firstDirective = manager.getSourceLocation(buffer.id, 2, 1);
+    auto firstMapped = manager.getSourceLocation(buffer.id, 3, 2);
+    auto secondDirective = manager.getSourceLocation(buffer.id, 4, 1);
+    auto secondMapped = manager.getSourceLocation(buffer.id, 5, 3);
+    REQUIRE(firstDirective);
+    REQUIRE(firstMapped);
+    REQUIRE(secondDirective);
+    REQUIRE(secondMapped);
+
+    manager.addLineDirective(*firstDirective, 40, "first-mapped.sv", 0);
+    manager.addLineDirective(*secondDirective, 7, "second-mapped.sv", 1);
+
+    CHECK(manager.getRawLineNumber(*firstMapped) == 3);
+    CHECK(manager.getLineNumber(*firstMapped) == 40);
+    CHECK(manager.getFileName(*firstMapped) == "first-mapped.sv");
+    CHECK(manager.getRawLineNumber(*secondMapped) == 5);
+    CHECK(manager.getLineNumber(*secondMapped) == 7);
+    CHECK(manager.getFileName(*secondMapped) == "second-mapped.sv");
+
+    auto directives = manager.getLineDirectives(buffer.id);
+    REQUIRE(directives.size() == 2);
+    CHECK(directives[0].name == "first-mapped.sv");
+    CHECK(directives[0].lineInFile == 2);
+    CHECK(directives[0].lineOfDirective == 40);
+    CHECK(directives[0].level == 0);
+    CHECK(directives[1].name == "second-mapped.sv");
+    CHECK(directives[1].lineInFile == 4);
+    CHECK(directives[1].lineOfDirective == 7);
+    CHECK(directives[1].level == 1);
+    CHECK(manager.getLineDirectives(BufferID::getPlaceholder()).empty());
+}
+
 TEST_CASE("Source text helpers") {
     SourceManager manager;
     auto buffer = manager.assignText("lines.sv", "first\nsecond\nthird");

@@ -12,9 +12,11 @@
 #include <filesystem>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <set>
 #include <shared_mutex>
 #include <span>
+#include <string>
 #include <variant>
 #include <vector>
 
@@ -42,6 +44,17 @@ class SLANG_EXPORT SourceManager {
 public:
     using BufferOrError = nonstd::expected<SourceBuffer, std::error_code>;
 
+    /// Information about a `line directive in a source buffer.
+    struct LineDirectiveInfo {
+        std::string name;       // File name set by directive
+        size_t lineInFile;      // Actual file line where directive occurred
+        size_t lineOfDirective; // Line number set by directive
+        uint8_t level;          // Level of directive. Either 0, 1, or 2.
+
+        LineDirectiveInfo(std::string&& fname, size_t lif, size_t lod, uint8_t level) noexcept :
+            name(std::move(fname)), lineInFile(lif), lineOfDirective(lod), level(level) {}
+    };
+
     /// Default constructor.
     SourceManager();
     SourceManager(const SourceManager&) = delete;
@@ -63,6 +76,13 @@ public:
 
     /// Gets the source line number for a given source location.
     size_t getLineNumber(SourceLocation location) const;
+
+    /// Gets the 1-based raw line number in the location's source buffer, without
+    /// applying macro expansion or `line directive mappings.
+    size_t getRawLineNumber(SourceLocation location) const;
+
+    /// Gets all `line directives registered for the given source buffer.
+    std::vector<LineDirectiveInfo> getLineDirectives(BufferID buffer) const;
 
     /// Gets the source file name for a given source location.
     std::string_view getFileName(SourceLocation location) const;
@@ -326,18 +346,6 @@ public:
     static void computeLineOffsets(std::string_view text, std::vector<size_t>& offsets) noexcept;
 
 private:
-    // Stores information specified in a `line directive, which alters the
-    // line number and file name that we report in diagnostics.
-    struct LineDirectiveInfo {
-        std::string name;       // File name set by directive
-        size_t lineInFile;      // Actual file line where directive occurred
-        size_t lineOfDirective; // Line number set by directive
-        uint8_t level;          // Level of directive. Either 0, 1, or 2.
-
-        LineDirectiveInfo(std::string&& fname, size_t lif, size_t lod, uint8_t level) noexcept :
-            name(std::move(fname)), lineInFile(lif), lineOfDirective(lod), level(level) {}
-    };
-
     // Stores actual file contents and metadata; only one per loaded file
     struct FileData {
         const std::string name;                       // name of the file
