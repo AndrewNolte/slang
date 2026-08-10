@@ -308,10 +308,37 @@ private:
     }
 
     bool doConcat(SmallVectorBase<Token>& targetBuf, Token right) {
+        Token left = targetBuf.back();
         SmallVector<Token> results;
-        if (!Lexer::concatenateTokens(pp.alloc, pp.sourceManager, pp.lexerOptions, targetBuf.back(),
-                                      right, results)) {
+        if (!Lexer::concatenateTokens(pp.alloc, pp.sourceManager, pp.lexerOptions, left, right,
+                                      results)) {
             return false;
+        }
+
+        // Leave locations intact when re-lexing does not merge the token boundary.
+        if (results.front().rawText().length() <= left.rawText().length())
+            return false;
+
+        auto findArgLoc = [&](SourceLocation loc) {
+            while (pp.sourceManager.isMacroLoc(loc)) {
+                if (pp.sourceManager.isMacroArgLoc(loc))
+                    return loc;
+                loc = pp.sourceManager.getExpansionLoc(loc);
+            }
+            return SourceLocation{};
+        };
+
+        SourceLocation leftArgLoc = findArgLoc(left.location());
+        SourceLocation rightArgLoc = findArgLoc(right.location());
+
+        if (leftArgLoc && rightArgLoc) {
+            results.front() = results.front().withLocation(
+                pp.alloc, pp.sourceManager.getExpansionLoc(leftArgLoc));
+        }
+        else if (SourceLocation argLoc = leftArgLoc ? leftArgLoc : rightArgLoc) {
+            SourceRange argStart(argLoc, argLoc + 1);
+            auto pasteLoc = pp.sourceManager.createExpansionLoc(argLoc, argStart, {});
+            results.front() = results.front().withLocation(pp.alloc, pasteLoc);
         }
 
         targetBuf.pop_back();
