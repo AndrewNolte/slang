@@ -188,6 +188,33 @@ endmodule
     CHECK(trees.size() == 2);
 }
 
+TEST_CASE("SourceLoader doesn't load port type names") {
+    SourceManager sourceManager;
+
+    auto top = SyntaxTree::fromText(R"(
+module top(some_type value, explicit_if.mp bus);
+endmodule
+)",
+                                    sourceManager, "", "load_tree_top.sv");
+
+    SourceLoader::SyntaxTreeList trees;
+    trees.push_back(top);
+
+    SourceOptions options{};
+    options.lookUpInterfacePorts = false;
+
+    int lookups = 0;
+    SourceLoader::loadTrees(trees,
+                            [&](std::string_view) {
+                                lookups++;
+                                return SourceBuffer();
+                            },
+                            sourceManager, options);
+
+    CHECK(lookups == 0);
+    CHECK(trees.size() == 1);
+}
+
 #if defined(SLANG_USE_THREADS)
 TEST_CASE("SourceLoader loads search libraries in parallel depths") {
     SourceManager sourceManager;

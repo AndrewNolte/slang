@@ -905,16 +905,19 @@ static std::vector<const SyntaxTree*> getSortedDependencies(
         flat_hash_set<const SyntaxTree*> seenTrees;
         flat_hash_set<std::string_view> seenMissing;
 
-        for (auto ref : tree->getMetadata().getReferencedSymbols()) {
-            if (auto it = nameToTree.find(ref); it != nameToTree.end()) {
-                if (seenTrees.insert(it->second).second)
-                    deps.childTrees.push_back(it->second);
-            }
-            else if (!declaredNames.contains(ref) && seenMissing.insert(ref).second) {
-                deps.missingNames.push_back(ref);
-                missingToTree.emplace(ref, tree.get());
-            }
-        }
+        tree->getMetadata().visitReferencedSymbols(
+            [&](parsing::Token token) {
+                auto ref = token.valueText();
+                if (auto it = nameToTree.find(ref); it != nameToTree.end()) {
+                    if (seenTrees.insert(it->second).second)
+                        deps.childTrees.push_back(it->second);
+                }
+                else if (!declaredNames.contains(ref) && seenMissing.insert(ref).second) {
+                    deps.missingNames.push_back(ref);
+                    missingToTree.emplace(ref, tree.get());
+                }
+            },
+            /* includePortNames */ true, /* includeNamedPortTypes */ false);
 
         treeToDeps.emplace(tree.get(), std::move(deps));
     }

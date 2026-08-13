@@ -966,12 +966,20 @@ endmodule
     auto checkMeta = [](const ParserMetadata& meta) {
         auto referenced = meta.getReferencedSymbols();
         std::ranges::sort(referenced);
-        CHECK(referenced == std::vector<std::string_view>{"explicit_if", "legacy_if", "types_pkg"});
+        CHECK(referenced == std::vector<std::string_view>{"explicit_if", "legacy_if", "old_type",
+                                                          "plain_if", "some_type", "types_pkg",
+                                                          "var_type"});
 
         std::vector<std::string_view> visited;
         meta.visitReferencedSymbols([&](Token token) { visited.push_back(token.valueText()); });
         std::ranges::sort(visited);
         CHECK(visited == referenced);
+
+        visited.clear();
+        meta.visitReferencedSymbols([&](Token token) { visited.push_back(token.valueText()); },
+                                    true, false);
+        std::ranges::sort(visited);
+        CHECK(visited == std::vector<std::string_view>{"explicit_if", "legacy_if", "types_pkg"});
 
         visited.clear();
         meta.visitReferencedSymbols([&](Token token) { visited.push_back(token.valueText()); },
@@ -1021,7 +1029,8 @@ endmodule
         std::ranges::sort(names);
         CHECK(names == std::vector<std::string_view>{"bus_if", "check_name", "check_pkg", "child",
                                                      "explicit_if", "external", "named_pkg",
-                                                     "settings", "wildcard_pkg"});
+                                                     "plain_if", "settings", "some_type",
+                                                     "wildcard_pkg"});
     };
     checkMeta(tree->getMetadata());
     checkMeta(ParserMetadata::fromSyntax(tree->root()));
@@ -1051,6 +1060,30 @@ module leaf; endmodule
         topNames.push_back(instance->name);
     std::ranges::sort(topNames);
     CHECK(topNames == std::vector<std::string_view>{"Model", "top"});
+}
+
+TEST_CASE("Parser metadata tracks named port types") {
+    auto tree = SyntaxTree::fromText(R"(
+module variable_port(some_type value); endmodule
+module interface_port(explicit_if.mp bus); endmodule
+)");
+
+    auto checkMetadata = [](const ParserMetadata& metadata) {
+        std::vector<std::string_view> referencedSymbols;
+        metadata.visitReferencedSymbols(
+            [&](Token token) { referencedSymbols.push_back(token.valueText()); });
+
+        CHECK(referencedSymbols == std::vector<std::string_view>{"explicit_if", "some_type"});
+        CHECK(metadata.getReferencedSymbols() == referencedSymbols);
+
+        referencedSymbols.clear();
+        metadata.visitReferencedSymbols(
+            [&](Token token) { referencedSymbols.push_back(token.valueText()); }, false);
+        CHECK(referencedSymbols.empty());
+    };
+
+    checkMetadata(tree->getMetadata());
+    checkMetadata(ParserMetadata::fromSyntax(tree->root()));
 }
 
 TEST_CASE("Syntax rewriter -- replace preserves trivia") {

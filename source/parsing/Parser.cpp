@@ -241,8 +241,12 @@ PortHeaderSyntax& Parser::parsePortHeader(Token constKeyword, Token direction) {
 
     if (kind == TokenKind::VarKeyword) {
         auto varKeyword = consume();
-        return factory.variablePortHeader(constKeyword, direction, varKeyword,
-                                          parseDataType(TypeOptions::AllowImplicit));
+        auto& type = parseDataType(TypeOptions::AllowImplicit);
+        if (auto namedType = type.as_if<NamedTypeSyntax>()) {
+            if (auto identifier = namedType->name->as_if<IdentifierNameSyntax>())
+                meta.namedPortTypes.push_back(identifier);
+        }
+        return factory.variablePortHeader(constKeyword, direction, varKeyword, type);
     }
 
     if (kind == TokenKind::Identifier) {
@@ -258,6 +262,11 @@ PortHeaderSyntax& Parser::parsePortHeader(Token constKeyword, Token direction) {
             type = &parseDataType();
         else
             type = &factory.implicitType(Token(), nullptr, placeholderToken());
+
+        if (auto namedType = type->as_if<NamedTypeSyntax>()) {
+            if (auto identifier = namedType->name->as_if<IdentifierNameSyntax>())
+                meta.namedPortTypes.push_back(identifier);
+        }
 
         return factory.variablePortHeader(constKeyword, direction, Token(), *type);
     }

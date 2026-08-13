@@ -42,6 +42,9 @@ struct SLANG_EXPORT ParserMetadata {
     /// A list of all enum types parsed.
     std::vector<const syntax::EnumTypeSyntax*> enumTypes;
 
+    /// A list of all simple named types used in variable port headers.
+    std::vector<const syntax::IdentifierNameSyntax*> namedPortTypes;
+
     /// The EOF token, if one has already been consumed by the parser.
     /// Otherwise an empty token.
     Token eofToken;
@@ -70,9 +73,10 @@ struct SLANG_EXPORT ParserMetadata {
     /// Visits all top level symbols referenced/used by this metadata, calling the provided
     /// function with each name token, including virtual interface types. Tokens retain source
     /// locations so callers can resolve dependencies relative to the referencing file.
-    /// If @a includeInterfacePorts is true, also includes explicit interface port types.
-    void visitReferencedSymbols(function_ref<void(Token)> func,
-                                bool includeInterfacePorts = true) const;
+    /// If @a includePortNames is true, also includes explicit interface port types and,
+    /// when @a includeNamedPortTypes is true, simple named variable port types.
+    void visitReferencedSymbols(function_ref<void(Token)> func, bool includePortNames = true,
+                                bool includeNamedPortTypes = true) const;
 };
 
 } // namespace slang::parsing

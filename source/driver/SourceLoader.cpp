@@ -417,7 +417,7 @@ void SourceLoader::loadTrees(SyntaxTreeList& syntaxTrees,
                 if (!knownNames.contains(name) && missingNames.emplace(name).second)
                     worklist.push_back({name, nullptr});
             },
-            srcOptions.lookUpInterfacePorts);
+            srcOptions.lookUpInterfacePorts, /* includeNamedPortTypes */ false);
     };
 
     // Initial pass: index existing trees and find what's missing

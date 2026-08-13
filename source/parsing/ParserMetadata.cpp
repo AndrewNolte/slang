@@ -66,6 +66,14 @@ public:
         visitDefault(syntax);
     }
 
+    void handle(const VariablePortHeaderSyntax& syntax) {
+        if (auto namedType = syntax.dataType->as_if<NamedTypeSyntax>()) {
+            if (auto identifier = namedType->name->as_if<IdentifierNameSyntax>())
+                meta.namedPortTypes.push_back(identifier);
+        }
+        visitDefault(syntax);
+    }
+
     void handle(const DefParamSyntax& syntax) {
         meta.hasDefparams = true;
         visitDefault(syntax);
@@ -220,7 +228,7 @@ std::vector<std::string_view> ParserMetadata::getReferencedSymbols() const {
 }
 
 void ParserMetadata::visitReferencedSymbols(function_ref<void(Token)> func,
-                                            bool includeInterfacePorts) const {
+                                            bool includePortNames, bool includeNamedPortTypes) const {
     auto visit = [&](Token token) {
         if (!token.valueText().empty())
             func(token);
@@ -251,7 +259,7 @@ void ParserMetadata::visitReferencedSymbols(function_ref<void(Token)> func,
         }
     }
 
-    if (!includeInterfacePorts)
+    if (!includePortNames)
         return;
 
     auto visitPort = [&](const PortHeaderSyntax& header) {
@@ -273,6 +281,11 @@ void ParserMetadata::visitReferencedSymbols(function_ref<void(Token)> func,
             if (auto port = member->as_if<PortDeclarationSyntax>())
                 visitPort(*port->header);
         }
+    }
+
+    if (includeNamedPortTypes) {
+        for (auto namedType : namedPortTypes)
+            visit(namedType->identifier);
     }
 }
 
