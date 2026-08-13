@@ -253,6 +253,11 @@ PortHeaderSyntax& Parser::parsePortHeader(Token constKeyword, Token direction) {
         else
             type = &factory.implicitType(Token(), nullptr, placeholderToken());
 
+        if (auto namedType = type->as_if<NamedTypeSyntax>()) {
+            if (auto identifier = namedType->name->as_if<IdentifierNameSyntax>())
+                meta.namedPortTypes.push_back(identifier);
+        }
+
         return factory.variablePortHeader(constKeyword, direction, Token(), *type);
     }
 
