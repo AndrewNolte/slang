@@ -766,6 +766,30 @@ class C; endclass
     }
 }
 
+TEST_CASE("Parser metadata tracks named port types") {
+    auto tree = SyntaxTree::fromText(R"(
+module variable_port(some_type value); endmodule
+module interface_port(explicit_if.mp bus); endmodule
+)");
+
+    auto checkMetadata = [](const ParserMetadata& metadata) {
+        std::vector<std::string_view> referencedSymbols;
+        metadata.visitReferencedSymbols(
+            [&](std::string_view name) { referencedSymbols.push_back(name); });
+
+        CHECK(referencedSymbols == std::vector<std::string_view>{"explicit_if", "some_type"});
+        CHECK(metadata.getReferencedSymbols() == referencedSymbols);
+
+        referencedSymbols.clear();
+        metadata.visitReferencedSymbols(
+            [&](std::string_view name) { referencedSymbols.push_back(name); }, false);
+        CHECK(referencedSymbols.empty());
+    };
+
+    checkMetadata(tree->getMetadata());
+    checkMetadata(ParserMetadata::fromSyntax(tree->root()));
+}
+
 TEST_CASE("Syntax rewriter -- replace preserves trivia") {
     auto tree = SyntaxTree::fromText(R"(
 module test(
