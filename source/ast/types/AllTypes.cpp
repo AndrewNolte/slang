@@ -122,6 +122,11 @@ using namespace syntax;
 
 const ErrorType ErrorType::Instance;
 
+void ErrorType::serializeTo(ASTSerializer& serializer) const {
+    if (child)
+        serializer.write("child", *child);
+}
+
 IntegralType::IntegralType(SymbolKind kind, std::string_view name, SourceLocation loc,
                            bitwidth_t bitWidth_, bool isSigned_, bool isFourState_) :
     Type(kind, name, loc), bitWidth(bitWidth_), isSigned(isSigned_), isFourState(isFourState_) {
@@ -464,7 +469,9 @@ const Type& EnumType::create(const EnumDeclaration& decl, const ASTContext& type
     if (syntax.parent && syntax.parent->kind == SyntaxKind::TypedefDeclaration)
         enumType->name = syntax.parent->as<TypedefDeclarationSyntax>().name.valueText();
 
-    auto resultType = cb->isError() ? cb : enumType;
+    const Type* resultType = enumType;
+    if (cb->isError())
+        resultType = &comp.getErrorType(*enumType);
 
     // Now that we know our type, make it available right away because
     // value initializers can refer to the type or to prior values.
@@ -1003,7 +1010,7 @@ const Type& PackedStructType::fromSyntax(Compilation& comp, const StructUnionTyp
             if (!issuedError && structType->bitWidth > (uint32_t)SVInt::MAX_BITS) {
                 context.addDiag(diag::PackedTypeTooLarge, syntax.sourceRange())
                     << structType->bitWidth << (uint32_t)SVInt::MAX_BITS;
-                return comp.getErrorType();
+                return comp.getErrorType(*structType);
             }
 
             if (decl->initializer) {
@@ -1015,7 +1022,7 @@ const Type& PackedStructType::fromSyntax(Compilation& comp, const StructUnionTyp
     }
 
     if (!structType->bitWidth || issuedError)
-        return comp.getErrorType();
+        return comp.getErrorType(*structType);
 
     // We added the fields in reverse order, so compute their actual
     // offsets in the right order now.
@@ -1204,7 +1211,7 @@ const Type& PackedUnionType::fromSyntax(Compilation& comp, const StructUnionType
     }
 
     if (!unionType->bitWidth || issuedError)
-        return comp.getErrorType();
+        return comp.getErrorType(*unionType);
 
     return createPackedDims(context, unionType, syntax.dimensions);
 }

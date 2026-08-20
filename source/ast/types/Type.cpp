@@ -437,6 +437,12 @@ bool Type::isMatching(const Type& rhs) const {
     if (l == r)
         return true;
 
+    if (l->isError() && r->isError()) {
+        auto lChild = l->as<ErrorType>().child;
+        auto rChild = r->as<ErrorType>().child;
+        return !lChild || !rChild || lChild->isMatching(*rChild);
+    }
+
     if (l->getSyntax() && l->getSyntax() == r->getSyntax() && l->getParentScope() &&
         l->getParentScope() == r->getParentScope()) {
         // Types declared with the same syntax in the same scope are identical,
