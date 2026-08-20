@@ -772,6 +772,9 @@ public:
     /// to represent an invalid type.
     const Type& getErrorType() const { return *errorType; }
 
+    /// Construct an error type that retains an invalid child type.
+    const Type& getErrorType(const Type& child);
+
     /// Get the built-in `int unsigned` type.
     const Type& getUnsignedIntType();
 

@@ -313,6 +313,40 @@ endmodule
     CHECK(diags[0].isError());
 }
 
+TEST_CASE("Unused warnings for wrapped error typed values") {
+    auto& text = R"(
+module m;
+    struct packed { real member; } bad_struct;
+    union packed { byte narrow; int wide; } bad_union;
+    enum bit [1:0][2:0] { A } bad_enum;
+endmodule
+)";
+
+    Compilation compilation;
+    auto diags = analyze(text, compilation);
+    REQUIRE(diags.size() == 6);
+    CHECK(diags[0].code == diag::PackedMemberNotIntegral);
+    CHECK(diags[1].code == diag::PackedUnionWidthMismatch);
+    CHECK(diags[2].code == diag::InvalidEnumBase);
+    CHECK(diags[3].code == diag::UnusedVariable);
+    CHECK(diags[4].code == diag::UnusedVariable);
+    CHECK(diags[5].code == diag::UnusedVariable);
+}
+
+TEST_CASE("Used enum value marks wrapped error typed typedef used") {
+    auto& text = R"(
+module m;
+    typedef enum bit [1:0][2:0] { A } bad_enum_t;
+    initial $display(A);
+endmodule
+)";
+
+    Compilation compilation;
+    auto diags = analyze(text, compilation);
+    REQUIRE(diags.size() == 1);
+    CHECK(diags[0].code == diag::InvalidEnumBase);
+}
+
 TEST_CASE("Unused diagnostics cover the symbol name") {
     auto& text = R"(
 module m;

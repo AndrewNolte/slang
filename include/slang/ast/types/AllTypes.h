@@ -607,14 +607,18 @@ private:
     mutable const ForwardingTypedefSymbol* firstForward = nullptr;
 };
 
-/// An empty type symbol that indicates an error occurred while trying to
-/// resolve the type of some expression or declaration.
+/// A type symbol that indicates an error occurred while trying to resolve
+/// the type of some expression or declaration.
 class SLANG_EXPORT ErrorType final : public Type {
 public:
-    ErrorType() : Type(SymbolKind::ErrorType, "", SourceLocation()) {}
+    /// A wrapped child type that is considered invalid.
+    const Type* child;
+
+    explicit ErrorType(const Type* child = nullptr) :
+        Type(SymbolKind::ErrorType, "", SourceLocation()), child(child) {}
 
     ConstantValue getDefaultValueImpl() const { return nullptr; }
-    void serializeTo(ASTSerializer&) const {}
+    void serializeTo(ASTSerializer& serializer) const;
 
     static bool isKind(SymbolKind kind) { return kind == SymbolKind::ErrorType; }
 
