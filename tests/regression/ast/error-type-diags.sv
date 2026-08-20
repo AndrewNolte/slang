@@ -12,6 +12,7 @@ typedef struct packed {
 nettype bad_struct_t bad_net;
 
 module sink(input bad_net value);
+//                        ^^^^^ UnusedPort unused port signal 'value'
 endmodule
 
 module top;
@@ -24,8 +25,10 @@ module top;
 
     enum bit [1:0][2:0] { A } bad_enum;
 //       ^^^^^^^^^^^^^^ InvalidEnumBase invalid enum base type 'bit[1:0][2:0]' (must be a single dimensional integer type)
+//                            ^^^^^^^^ UnusedVariable unused variable 'bad_enum'
     union packed { byte narrow; int wide; } bad_union;
 //                                  ^^^^ PackedUnionWidthMismatch all members of a packed union must have the same width; 'wide' has width of 32, previously seen width was 8
+//                                          ^^^^^^^^^ UnusedVariable unused variable 'bad_union'
 
     sink u_sink(0);
 endmodule

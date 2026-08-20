@@ -313,9 +313,13 @@ struct AnalysisScopeVisitor {
         // of any of the enum values as a usage of the typedef itself
         // (since there's no good way otherwise to introduce enum values
         // without the typedef).
-        auto& targetType = symbol.targetType.getType();
-        if (targetType.kind == SymbolKind::EnumType) {
-            for (auto& val : targetType.as<EnumType>().values()) {
+        auto& targetType = symbol.targetType.getType().getCanonicalType();
+        const Type* enumType = &targetType;
+        if (targetType.kind == SymbolKind::ErrorType)
+            enumType = targetType.as<ErrorType>().child;
+
+        if (enumType && enumType->kind == SymbolKind::EnumType) {
+            for (auto& val : enumType->as<EnumType>().values()) {
                 if (auto valSyntax = val.getSyntax()) {
                     auto [valUsed, _] = isReferenced(*valSyntax);
                     if (valUsed)
@@ -428,8 +432,11 @@ private:
             return;
 
         auto syntax = symbol.getSyntax();
-        if (!syntax || symbol.name.empty() || symbol.getType().isError())
+        auto& type = symbol.getType().getCanonicalType();
+        if (!syntax || symbol.name.empty() ||
+            (type.kind == SymbolKind::ErrorType && !type.as<ErrorType>().child)) {
             return;
+        }
 
         auto [rvalue, lvalue] = isReferenced(*syntax);
 

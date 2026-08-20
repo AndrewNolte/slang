@@ -163,6 +163,10 @@ Compilation::Compilation(const Bag& options, const SourceLibrary* defaultLib) :
 
 Compilation::~Compilation() = default;
 
+const Type& Compilation::getErrorType(const Type& child) {
+    return *emplace<ErrorType>(&child);
+}
+
 void Compilation::addSyntaxTree(std::shared_ptr<SyntaxTree> tree) {
     SLANG_ASSERT(!isFrozen());
 

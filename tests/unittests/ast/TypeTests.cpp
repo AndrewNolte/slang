@@ -2592,6 +2592,13 @@ endmodule
     auto& diags = compilation.getAllDiagnostics();
     REQUIRE(diags.size() == 1);
     CHECK(diags[0].code == diag::InvalidEnumBase);
+
+    auto& instance = compilation.getRoot().lookupName<InstanceSymbol>("m").body;
+    auto& type = instance.find<VariableSymbol>("b").getType();
+    REQUIRE(type.kind == SymbolKind::ErrorType);
+    REQUIRE(type.as<ErrorType>().child);
+    CHECK(type.as<ErrorType>().child->kind == SymbolKind::EnumType);
+    CHECK(type.as<ErrorType>().child->as<EnumType>().find("A"));
 }
 
 TEST_CASE("Enum can't be its own base type") {
@@ -2769,6 +2776,16 @@ endmodule
     auto& diags = compilation.getAllDiagnostics();
     REQUIRE(diags.size() == 1);
     CHECK(diags[0].code == diag::PackedMemberNotIntegral);
+
+    auto& instance = compilation.getRoot().lookupName<InstanceSymbol>("m").body;
+    auto& type = instance.find<VariableSymbol>("s").getType();
+    REQUIRE(type.kind == SymbolKind::ErrorType);
+    REQUIRE(type.as<ErrorType>().child);
+    CHECK(type.as<ErrorType>().child->kind == SymbolKind::PackedStructType);
+    CHECK(type.as<ErrorType>().child->as<PackedStructType>().find("r"));
+    CHECK(type.isMatching(compilation.getErrorType()));
+    CHECK(type.isMatching(compilation.getErrorType(*type.as<ErrorType>().child)));
+    CHECK(!type.isMatching(compilation.getErrorType(compilation.getStringType())));
 }
 
 TEST_CASE("Packed struct member cannot have initializer") {
@@ -2814,6 +2831,14 @@ endmodule
     auto& diags = compilation.getAllDiagnostics();
     REQUIRE(diags.size() == 1);
     CHECK(diags[0].code == diag::PackedUnionWidthMismatch);
+
+    auto& instance = compilation.getRoot().lookupName<InstanceSymbol>("m").body;
+    auto& type = instance.find<VariableSymbol>("u").getType();
+    REQUIRE(type.kind == SymbolKind::ErrorType);
+    REQUIRE(type.as<ErrorType>().child);
+    CHECK(type.as<ErrorType>().child->kind == SymbolKind::PackedUnionType);
+    CHECK(type.as<ErrorType>().child->as<PackedUnionType>().find("a"));
+    CHECK(type.as<ErrorType>().child->as<PackedUnionType>().find("b"));
 }
 
 TEST_CASE("Packed dimensions not allowed on predefined integer type") {

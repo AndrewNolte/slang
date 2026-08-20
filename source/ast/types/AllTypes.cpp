@@ -122,6 +122,11 @@ using namespace syntax;
 
 const ErrorType ErrorType::Instance;
 
+void ErrorType::serializeTo(ASTSerializer& serializer) const {
+    if (child)
+        serializer.write("child", *child);
+}
+
 IntegralType::IntegralType(SymbolKind kind, std::string_view name, SourceLocation loc,
                            bitwidth_t bitWidth_, bool isSigned_, bool isFourState_) :
     Type(kind, name, loc), bitWidth(bitWidth_), isSigned(isSigned_), isFourState(isFourState_) {
@@ -355,7 +360,9 @@ const Type& EnumType::fromSyntax(Compilation& comp, const EnumTypeSyntax& syntax
     if (syntax.parent && syntax.parent->kind == SyntaxKind::TypedefDeclaration)
         enumType->name = syntax.parent->as<TypedefDeclarationSyntax>().name.valueText();
 
-    auto resultType = cb->isError() ? cb : enumType;
+    const Type* resultType = enumType;
+    if (cb->isError())
+        resultType = &comp.getErrorType(*enumType);
 
     // Enum values must be unique; this set and lambda are used to check that.
     SmallMap<SVInt, SourceLocation, 8> usedValues;
@@ -599,7 +606,11 @@ const Type& EnumType::findDefinition(Compilation& comp, const EnumTypeSyntax& sy
     auto symbol = context.scope->find(name);
     if (symbol && symbol->kind == SymbolKind::EnumValue) {
         auto& type = symbol->as<EnumValueSymbol>().getType().getCanonicalType();
-        if (type.getSyntax() == &syntax)
+        const Type* syntaxType = &type;
+        if (type.isError() && type.as<ErrorType>().child)
+            syntaxType = type.as<ErrorType>().child;
+
+        if (syntaxType->getSyntax() == &syntax)
             return createPackedDims(context, &type, syntax.dimensions);
     }
 
@@ -907,7 +918,7 @@ const Type& PackedStructType::fromSyntax(Compilation& comp, const StructUnionTyp
             if (!issuedError && structType->bitWidth > (uint32_t)SVInt::MAX_BITS) {
                 context.addDiag(diag::PackedTypeTooLarge, syntax.sourceRange())
                     << structType->bitWidth << (uint32_t)SVInt::MAX_BITS;
-                return comp.getErrorType();
+                return comp.getErrorType(*structType);
             }
 
             if (decl->initializer) {
@@ -919,7 +930,7 @@ const Type& PackedStructType::fromSyntax(Compilation& comp, const StructUnionTyp
     }
 
     if (!structType->bitWidth || issuedError)
-        return comp.getErrorType();
+        return comp.getErrorType(*structType);
 
     // We added the fields in reverse order, so compute their actual
     // offsets in the right order now.
@@ -1103,7 +1114,7 @@ const Type& PackedUnionType::fromSyntax(Compilation& comp, const StructUnionType
     }
 
     if (!unionType->bitWidth || issuedError)
-        return comp.getErrorType();
+        return comp.getErrorType(*unionType);
 
     return createPackedDims(context, unionType, syntax.dimensions);
 }
