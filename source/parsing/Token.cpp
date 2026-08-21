@@ -470,7 +470,8 @@ std::string_view Token::rawText() const {
 }
 
 SourceRange Token::range() const {
-    return SourceRange(location(), location() + rawText().length());
+    auto loc = location();
+    return SourceRange(loc, isMissing() ? loc : loc + rawText().length());
 }
 
 SourceLocation Token::location() const {
