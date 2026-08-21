@@ -2782,10 +2782,38 @@ endmodule
     REQUIRE(type.kind == SymbolKind::ErrorType);
     REQUIRE(type.as<ErrorType>().child);
     CHECK(type.as<ErrorType>().child->kind == SymbolKind::PackedStructType);
-    CHECK(type.as<ErrorType>().child->as<PackedStructType>().find("r"));
+    auto& structType = type.as<ErrorType>().child->as<PackedStructType>();
+    auto& field = structType.find<FieldSymbol>("r");
+    REQUIRE(field.getDeclaredType()->getTypeSyntax());
+    CHECK(field.getDeclaredType()->getTypeSyntax()->getFirstToken().valueText() == "real");
     CHECK(type.isMatching(compilation.getErrorType()));
     CHECK(type.isMatching(compilation.getErrorType(*type.as<ErrorType>().child)));
     CHECK(!type.isMatching(compilation.getErrorType(compilation.getStringType())));
+}
+
+TEST_CASE("Packed struct field preserves declared dimensions") {
+    auto tree = SyntaxTree::fromText(R"(
+module m;
+    struct packed { logic field [3:0]; } s;
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+
+    auto& diags = compilation.getAllDiagnostics();
+    REQUIRE(diags.size() == 1);
+    CHECK(diags[0].code == diag::PackedMemberNotIntegral);
+
+    auto& instance = compilation.getRoot().lookupName<InstanceSymbol>("m").body;
+    auto& type = instance.find<VariableSymbol>("s").getType();
+    REQUIRE(type.kind == SymbolKind::ErrorType);
+    REQUIRE(type.as<ErrorType>().child);
+    auto& field = type.as<ErrorType>().child->as<PackedStructType>().find<FieldSymbol>("field");
+    auto* dimensions = field.getDeclaredType()->getDimensionSyntax();
+    REQUIRE(dimensions);
+    REQUIRE(dimensions->size() == 1);
+    CHECK((*dimensions)[0]->getFirstToken().valueText() == "[");
 }
 
 TEST_CASE("Packed struct member cannot have initializer") {
@@ -2837,8 +2865,11 @@ endmodule
     REQUIRE(type.kind == SymbolKind::ErrorType);
     REQUIRE(type.as<ErrorType>().child);
     CHECK(type.as<ErrorType>().child->kind == SymbolKind::PackedUnionType);
-    CHECK(type.as<ErrorType>().child->as<PackedUnionType>().find("a"));
-    CHECK(type.as<ErrorType>().child->as<PackedUnionType>().find("b"));
+    auto& unionType = type.as<ErrorType>().child->as<PackedUnionType>();
+    auto& field = unionType.find<FieldSymbol>("a");
+    REQUIRE(field.getDeclaredType()->getTypeSyntax());
+    CHECK(field.getDeclaredType()->getTypeSyntax()->getFirstToken().valueText() == "byte");
+    CHECK(unionType.find("b"));
 }
 
 TEST_CASE("Packed dimensions not allowed on predefined integer type") {

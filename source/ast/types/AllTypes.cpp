@@ -898,6 +898,7 @@ const Type& PackedStructType::fromSyntax(Compilation& comp, const StructUnionTyp
         for (auto decl : member->declarators) {
             auto field = comp.emplace<FieldSymbol>(decl->name.valueText(), decl->name.location(),
                                                    0u, (uint32_t)members.size());
+            field->setDeclaredType(*member->type, decl->dimensions);
             field->setType(type);
             field->setSyntax(*decl);
             field->setAttributes(*context.scope, member->attributes);
@@ -1070,6 +1071,7 @@ const Type& PackedUnionType::fromSyntax(Compilation& comp, const StructUnionType
             auto name = decl->name;
             auto field = comp.emplace<FieldSymbol>(name.valueText(), name.location(), 0u,
                                                    fieldIndex++);
+            field->setDeclaredType(*member->type, decl->dimensions);
             field->setType(type);
             field->setSyntax(*decl);
             field->setAttributes(*context.scope, member->attributes);
