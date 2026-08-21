@@ -675,6 +675,24 @@ TEST_CASE("Assignment pattern error recovery") {
     parseCompilationUnit(text);
 }
 
+TEST_CASE("Missing tokens have zero-width source ranges") {
+    auto& text = "foo[(";
+    auto& expr = parseExpression(text);
+
+    size_t missingCount = 0;
+    for (auto it = expr.tokens_begin(); it != expr.tokens_end(); ++it) {
+        auto token = *it;
+        if (token.isMissing()) {
+            missingCount++;
+            CHECK(token.range().start() == token.location());
+            CHECK(token.range().end() == token.location());
+        }
+    }
+
+    CHECK(missingCount > 1);
+    CHECK(expr.sourceRange().end().offset() == std::string_view(text).size());
+}
+
 TEST_CASE("Unary expression parsing error") {
     auto tree = SyntaxTree::fromText(R"(
 module m;
