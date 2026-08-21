@@ -584,7 +584,7 @@ public:
 
         auto f = this->front()->getFirstToken();
         auto l = this->back()->getLastToken();
-        return SourceRange(f.location(), l.location() + l.rawText().length());
+        return SourceRange(f.location(), l.range().end());
     }
 
 private:
@@ -719,7 +719,7 @@ public:
 
         auto f = front();
         auto l = back();
-        return SourceRange(f.location(), l.location() + l.rawText().length());
+        return SourceRange(f.location(), l.range().end());
     }
 
 private:
