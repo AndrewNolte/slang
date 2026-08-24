@@ -141,3 +141,43 @@ module nested_and_outer_missing_assignment_pattern_statement;
 //                  ^^ AssignmentPatternNoMember member 'outer_missing' is not covered by any assignment pattern key
 //                           ^^ AssignmentPatternNoMember member 'missing' is not covered by any assignment pattern key
 endmodule
+
+module nested_struct_member_setter_missing_field;
+    typedef struct {
+        int covered;
+//          ^ NoteDeclarationHere declared here - for AssignmentPatternNoMember(covered)
+        real leaf;
+    } inner_t;
+    typedef struct {
+        inner_t nested;
+        int covered;
+    } outer_t;
+
+    outer_t value = '{covered: 1};
+//                  ^^ AssignmentPatternNoMember member 'covered' is not covered by any assignment pattern key
+endmodule
+
+module nested_struct_type_setter_missing_field;
+    typedef struct {
+        int covered;
+        real leaf;
+//           ^ NoteDeclarationHere declared here - for AssignmentPatternNoMember(leaf)
+    } inner_t;
+    typedef struct {
+        inner_t nested;
+        int covered;
+    } outer_t;
+
+    outer_t value = '{int: 1};
+//                  ^^ AssignmentPatternNoMember member 'leaf' is not covered by any assignment pattern key
+endmodule
+
+module unpacked_array_missing_element;
+    typedef struct {
+        int member;
+//          ^ NoteDeclarationHere declared here - for AssignmentPatternNoMember(member)
+    } element_t;
+
+    element_t values[2] = '{0: '{member: 1}};
+//                        ^^ AssignmentPatternNoMember member 'member' is not covered by any assignment pattern key
+endmodule
