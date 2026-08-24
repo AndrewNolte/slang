@@ -1168,8 +1168,13 @@ ConstantValue SimpleAssignmentPatternExpression::applyConversions(EvalContext& c
     }
 }
 
+struct AssignmentPatternFieldPath {
+    const FieldSymbol& field;
+    const AssignmentPatternFieldPath* parent;
+};
+
 static const Expression* matchElementValue(
-    const ASTContext& context, const Type& elementType, const FieldSymbol* targetField,
+    const ASTContext& context, const Type& elementType, const AssignmentPatternFieldPath* fieldPath,
     const Type& assignmentTargetType, const StructuredAssignmentPatternSyntax& syntax,
     std::span<const StructuredAssignmentPatternExpression::TypeSetter> typeSetters,
     const Expression* defaultSetter) {
@@ -1212,8 +1217,7 @@ static const Expression* matchElementValue(
             return &Expression::bindRValue(elementType, *defaultSyntax, {}, context);
     }
 
-    // Otherwise, we check first if the type is a struct or array, in which
-    // case we descend recursively into its members before continuing on with the default.
+    // Otherwise, type and default setters can apply recursively to nested members.
     if (elementType.isStruct()) {
         const Scope* structScope;
         if (elementType.isUnpackedStruct())
@@ -1227,8 +1231,9 @@ static const Expression* matchElementValue(
             if (type.isError() || field.name.empty())
                 return nullptr;
 
-            auto elemExpr = matchElementValue(context, type, &field, assignmentTargetType, syntax,
-                                              typeSetters, defaultSetter);
+            AssignmentPatternFieldPath nestedFieldPath{field, fieldPath};
+            auto elemExpr = matchElementValue(context, type, &nestedFieldPath, assignmentTargetType,
+                                              syntax, typeSetters, defaultSetter);
             if (!elemExpr)
                 return nullptr;
 
@@ -1245,8 +1250,8 @@ static const Expression* matchElementValue(
         auto nestedElemType = elementType.getArrayElementType();
         SLANG_ASSERT(nestedElemType);
 
-        auto elemExpr = matchElementValue(context, *nestedElemType, targetField,
-                                          assignmentTargetType, syntax, typeSetters, defaultSetter);
+        auto elemExpr = matchElementValue(context, *nestedElemType, fieldPath, assignmentTargetType,
+                                          syntax, typeSetters, defaultSetter);
         if (!elemExpr)
             return nullptr;
 
@@ -1266,11 +1271,23 @@ static const Expression* matchElementValue(
         return &Expression::bindRValue(elementType, *defaultSyntax, {}, context);
 
     // Otherwise there's no setter for this element, which is an error.
-    if (targetField) {
+    if (fieldPath) {
+        SmallVector<const FieldSymbol*> fields;
+        for (auto curr = fieldPath; curr; curr = curr->parent)
+            fields.push_back(&curr->field);
+
+        std::string memberPath;
+        for (auto field : std::views::reverse(fields)) {
+            if (!memberPath.empty())
+                memberPath += '.';
+            memberPath += field->name;
+        }
+
         auto& diag = context.addDiag(diag::AssignmentPatternNoMember,
                                      syntax.getFirstToken().range());
-        diag << targetField->name;
-        diag.addNote(diag::NoteDeclarationHere, targetField->location);
+        diag << memberPath;
+        for (auto field : fields)
+            diag.addNote(diag::NoteDeclarationHere, field->location);
     }
     else {
         SLANG_ASSERT(assignmentTargetType.hasFixedRange());
@@ -1381,6 +1398,7 @@ Expression& StructuredAssignmentPatternExpression::forStruct(
         }
     }
 
+    const bool canRecurse = !typeSetters.empty() || defaultSetter;
     SmallVector<const Expression*> elements;
     for (auto& field : structScope.membersOfType<FieldSymbol>()) {
         // If we already have a setter for this field we don't have to do anything else.
@@ -1395,7 +1413,17 @@ Expression& StructuredAssignmentPatternExpression::forStruct(
             continue;
         }
 
-        auto expr = matchElementValue(context, fieldType, &field, type, syntax, typeSetters,
+        if (!canRecurse) {
+            auto& diag = context.addDiag(diag::AssignmentPatternNoMember,
+                                         syntax.getFirstToken().range());
+            diag << field.name;
+            diag.addNote(diag::NoteDeclarationHere, field.location);
+            bad = true;
+            continue;
+        }
+
+        AssignmentPatternFieldPath fieldPath{field, nullptr};
+        auto expr = matchElementValue(context, fieldType, &fieldPath, type, syntax, typeSetters,
                                       defaultSetter);
         if (!expr) {
             bad = true;
@@ -1492,6 +1520,7 @@ Expression& StructuredAssignmentPatternExpression::forFixedArray(
         }
     }
 
+    const bool canRecurse = !typeSetters.empty() || defaultSetter;
     SmallVector<const Expression*> elements;
     std::optional<const Expression*> cachedVal;
     auto arrayRange = type.getFixedRange();
@@ -1506,6 +1535,14 @@ Expression& StructuredAssignmentPatternExpression::forFixedArray(
         if (auto it = indexMap.find(i); it != indexMap.end()) {
             elements.push_back(it->second);
             continue;
+        }
+
+        if (!canRecurse) {
+            context.addDiag(diag::AssignmentPatternMissingElements,
+                            syntax.getFirstToken().range())
+                << type;
+            bad = true;
+            break;
         }
 
         if (!cachedVal) {
