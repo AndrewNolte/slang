@@ -145,39 +145,39 @@ endmodule
 module nested_struct_member_setter_missing_field;
     typedef struct {
         int covered;
-//          ^ NoteDeclarationHere declared here - for AssignmentPatternNoMember(covered)
         real leaf;
     } inner_t;
     typedef struct {
         inner_t nested;
+//              ^ NoteDeclarationHere declared here - for AssignmentPatternNoMember(nested)
         int covered;
     } outer_t;
 
     outer_t value = '{covered: 1};
-//                  ^^ AssignmentPatternNoMember member 'covered' is not covered by any assignment pattern key
+//                  ^^ AssignmentPatternNoMember member 'nested' is not covered by any assignment pattern key
 endmodule
 
 module nested_struct_type_setter_missing_field;
     typedef struct {
         int covered;
         real leaf;
-//           ^ NoteDeclarationHere declared here - for AssignmentPatternNoMember(leaf)
+//           ^ NoteDeclarationHere declared here - for AssignmentPatternNoMember(nested.leaf)
     } inner_t;
     typedef struct {
         inner_t nested;
+//              ^ NoteDeclarationHere declared here - for AssignmentPatternNoMember(nested.leaf)
         int covered;
     } outer_t;
 
     outer_t value = '{int: 1};
-//                  ^^ AssignmentPatternNoMember member 'leaf' is not covered by any assignment pattern key
+//                  ^^ AssignmentPatternNoMember member 'nested.leaf' is not covered by any assignment pattern key
 endmodule
 
 module unpacked_array_missing_element;
     typedef struct {
         int member;
-//          ^ NoteDeclarationHere declared here - for AssignmentPatternNoMember(member)
     } element_t;
 
     element_t values[2] = '{0: '{member: 1}};
-//                        ^^ AssignmentPatternNoMember member 'member' is not covered by any assignment pattern key
+//                        ^^ AssignmentPatternMissingElements assignment pattern does not cover all elements of type 'element_t$[2]'
 endmodule
