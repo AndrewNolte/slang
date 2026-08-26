@@ -584,14 +584,16 @@ void Compilation::resolveDefParamsAndBinds() {
 
             auto node = getNodeFor(entry.path, c);
             auto [it, inserted] = node->paramOverrides.emplace(
-                entry.targetSyntax,
-                HierarchyOverrideNode::ParamOverride{entry.value, nullptr, entry.defparamSyntax});
+                entry.targetSyntax, HierarchyOverrideNode::ValueParamOverride{
+                                        entry.value, nullptr, entry.defparamSyntax});
 
             if (!inserted && isFinal) {
-                SLANG_ASSERT(it->second.defparam);
+                auto* previous = std::get_if<HierarchyOverrideNode::ValueParamOverride>(
+                    &it->second);
+                SLANG_ASSERT(previous && previous->defparam);
                 auto& diag = c.root->addDiag(diag::DuplicateDefparam,
                                              entry.defparamSyntax->sourceRange());
-                diag.addNote(diag::NotePreviousDefinition, it->second.defparam->sourceRange());
+                diag.addNote(diag::NotePreviousDefinition, previous->defparam->sourceRange());
             }
         }
 

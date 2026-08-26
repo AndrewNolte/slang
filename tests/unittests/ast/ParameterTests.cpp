@@ -7,8 +7,11 @@
 #include "slang/ast/symbols/CompilationUnitSymbols.h"
 #include "slang/ast/symbols/InstanceSymbols.h"
 #include "slang/ast/symbols/ParameterSymbols.h"
+#include "slang/ast/symbols/PortSymbols.h"
+#include "slang/ast/symbols/VariableSymbols.h"
 #include "slang/ast/types/AllTypes.h"
 #include "slang/ast/types/Type.h"
+#include "slang/syntax/AllSyntax.h"
 
 SVInt testParameter(const std::string& text, uint32_t index = 0) {
     const auto& fullText = "module Top; " + text + " endmodule";
@@ -879,6 +882,122 @@ endmodule
     Compilation compilation(options);
     compilation.addSyntaxTree(tree);
     NO_COMPILATION_ERRORS;
+}
+
+TEST_CASE("Hierarchy overrides for uninstantiated definitions") {
+    auto tree = SyntaxTree::fromText(R"(
+interface I #(parameter int P = 1, parameter type T = logic, parameter int U = 3);
+    localparam int Derived = P + 1;
+    T data;
+endinterface
+)");
+
+    CompilationOptions options;
+    options.flags |= CompilationFlags::CheckUninstantiated;
+
+    Compilation compilation(options);
+    compilation.addSyntaxTree(tree);
+
+    auto definitions = compilation.getDefinitions();
+    REQUIRE(definitions.size() == 1);
+    auto& definition = definitions[0]->as<DefinitionSymbol>();
+    REQUIRE(definition.parameters.size() == 4);
+
+    auto& overrides = compilation.getOrAddTopLevelHierarchyOverride(*definition.getSyntax());
+    overrides.paramOverrides.emplace(definition.parameters[0].valueDecl,
+                                     HierarchyOverrideNode::ValueParamOverride{
+                                         ConstantValue(SVInt(8))});
+    overrides.paramOverrides.emplace(definition.parameters[1].typeDecl,
+                                     HierarchyOverrideNode::TypeParamOverride{
+                                         &compilation.getByteType()});
+
+    const InstanceSymbol* instance = nullptr;
+    for (auto& member : compilation.getRoot().members()) {
+        auto* candidate = member.as_if<InstanceSymbol>();
+        if (candidate && candidate->body.getDefinition().name == "I") {
+            instance = candidate;
+            break;
+        }
+    }
+    REQUIRE(instance);
+    CHECK(instance->body.flags.has(InstanceFlags::Uninstantiated));
+
+    auto& p = instance->body.find<ParameterSymbol>("P");
+    CHECK(p.getValue().integer() == 8);
+    auto& t = instance->body.find<TypeParameterSymbol>("T");
+    CHECK(t.targetType.getType().isMatching(compilation.getByteType()));
+    auto& u = instance->body.find<ParameterSymbol>("U");
+    CHECK(u.getValue().bad());
+    auto& derived = instance->body.find<ParameterSymbol>("Derived");
+    CHECK(derived.getValue().integer() == 9);
+    auto& data = instance->body.find<VariableSymbol>("data");
+    CHECK(data.getType().isMatching(compilation.getByteType()));
+}
+
+TEST_CASE("Hierarchy overrides for default interface ports") {
+    auto tree = SyntaxTree::fromText(R"(
+interface I #(parameter int P = 1, parameter type T = logic);
+    T data;
+endinterface
+
+module top(I scalar, I array[2]);
+endmodule
+)");
+
+    CompilationOptions options;
+    options.flags |= CompilationFlags::AllowTopLevelIfacePorts;
+    Compilation compilation(options);
+    compilation.addSyntaxTree(tree);
+
+    const DefinitionSymbol* iface = nullptr;
+    const DefinitionSymbol* top = nullptr;
+    for (auto symbol : compilation.getDefinitions()) {
+        auto& definition = symbol->as<DefinitionSymbol>();
+        if (definition.name == "I")
+            iface = &definition;
+        else if (definition.name == "top")
+            top = &definition;
+    }
+    REQUIRE(iface);
+    REQUIRE(top);
+    REQUIRE(iface->parameters.size() == 2);
+
+    auto& overrides = compilation.getOrAddTopLevelHierarchyOverride(*top->getSyntax());
+    auto& ports = top->portList->as<AnsiPortListSyntax>().ports;
+    for (size_t i = 0; i < ports.size(); i++) {
+        auto& port = ports[i]->as<ImplicitAnsiPortSyntax>();
+        auto& portOverrides = overrides.childNodes[*port.declarator];
+        portOverrides.paramOverrides.emplace(iface->parameters[0].valueDecl,
+                                             HierarchyOverrideNode::ValueParamOverride{
+                                                 ConstantValue(SVInt(int(i) + 8))});
+        portOverrides.paramOverrides.emplace(iface->parameters[1].typeDecl,
+                                             HierarchyOverrideNode::TypeParamOverride{
+                                                 &compilation.getByteType()});
+    }
+
+    NO_COMPILATION_ERRORS;
+    auto instances = compilation.getRoot().topInstances;
+    REQUIRE(instances.size() == 1);
+    auto connections = instances[0]->getPortConnections();
+    REQUIRE(connections.size() == 2);
+    for (size_t i = 0; i < connections.size(); i++) {
+        auto symbol = connections[i]->getIfaceConn().first;
+        REQUIRE(symbol);
+        auto checkInstance = [&](const InstanceSymbol& instance) {
+            CHECK(instance.body.find<ParameterSymbol>("P").getValue().integer() == int(i) + 8);
+            CHECK(instance.body.find<VariableSymbol>("data").getType().isMatching(
+                compilation.getByteType()));
+        };
+        if (i == 0) {
+            checkInstance(symbol->as<InstanceSymbol>());
+        }
+        else {
+            auto& array = symbol->as<InstanceArraySymbol>();
+            REQUIRE(array.elements.size() == 2);
+            for (auto element : array.elements)
+                checkInstance(element->as<InstanceSymbol>());
+        }
+    }
 }
 
 TEST_CASE("defparams") {

@@ -457,12 +457,12 @@ Symbol& InstanceSymbol::createDefaultNested(const Scope& scope,
     return result;
 }
 
-InstanceSymbol& InstanceSymbol::createInvalid(Compilation& comp,
-                                              const DefinitionSymbol& definition) {
+InstanceSymbol& InstanceSymbol::createInvalid(Compilation& comp, const DefinitionSymbol& definition,
+                                              const HierarchyOverrideNode* hierarchyOverrideNode) {
     // Give this instance an empty name so that it can't be referenced by name.
     auto& body = InstanceBodySymbol::fromDefinition(comp, definition, definition.location,
-                                                    InstanceFlags::Uninstantiated, nullptr, nullptr,
-                                                    nullptr);
+                                                    InstanceFlags::Uninstantiated,
+                                                    hierarchyOverrideNode, nullptr, nullptr);
     return *comp.emplace<InstanceSymbol>("", SourceLocation::NoLocation, body, 0u);
 }
 
@@ -1161,6 +1161,16 @@ void InstanceSymbol::connectDefaultIfacePorts() const {
                                                    *assignment.constraintExpr);
                     }
                 }
+
+                const HierarchyOverrideNode* overrideNode = nullptr;
+                if (body.hierarchyOverrideNode) {
+                    if (auto* syntax = port->getSyntax()) {
+                        auto it = body.hierarchyOverrideNode->childNodes.find(*syntax);
+                        if (it != body.hierarchyOverrideNode->childNodes.end())
+                            overrideNode = &it->second;
+                    }
+                }
+                paramBuilder.setOverrides(overrideNode);
 
                 Symbol* inst;
                 const ModportSymbol* modport = nullptr;

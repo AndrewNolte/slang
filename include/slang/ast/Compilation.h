@@ -8,6 +8,7 @@
 #pragma once
 
 #include <memory>
+#include <variant>
 
 #include "slang/ast/ASTDiagMap.h"
 #include "slang/ast/InstanceCacheKey.h"
@@ -274,18 +275,29 @@ struct SLANG_EXPORT BindDirectiveInfo {
 /// should be overriden and/or bind directives should be applied. These are assembled
 /// from defparam values, bind directives, and command-line specified overrides.
 struct SLANG_EXPORT HierarchyOverrideNode {
-    /// Represents a single parameter override value.
-    struct ParamOverride {
+    /// Represents a value parameter override.
+    struct ValueParamOverride {
         /// The pre-evaluated constant value. Empty when @a expr is set instead.
-        ConstantValue cv;
+        ConstantValue value;
 
         /// An expression syntax to evaluate with type context (for CLI overrides).
-        /// Null when @a cv is set instead.
+        /// Null when @a value is set instead.
         const syntax::ExpressionSyntax* expr = nullptr;
 
         /// The source defparam syntax node doing the overriding, if any (can be null).
         const syntax::SyntaxNode* defparam = nullptr;
     };
+
+    /// Represents a type parameter override.
+    struct TypeParamOverride {
+        /// The pre-evaluated type parameter value.
+        const Type* type = nullptr;
+
+        /// The source syntax for @a type, if available.
+        const syntax::DataTypeSyntax* syntax = nullptr;
+    };
+
+    using ParamOverride = std::variant<ValueParamOverride, TypeParamOverride>;
 
     /// A map of parameters in the current scope to override.
     /// The key is the syntax node representing the parameter.
@@ -338,6 +350,12 @@ public:
     /// Adds a syntax tree to the compilation. If the compilation has already been finalized
     /// by calling @a getRoot this call will throw an exception.
     void addSyntaxTree(std::shared_ptr<syntax::SyntaxTree> tree);
+
+    /// Gets the override node for a top-level definition, creating it if necessary. This must be
+    /// called before the compilation is finalized. The syntax node can come from another
+    /// compilation that shares the same syntax tree.
+    HierarchyOverrideNode& getOrAddTopLevelHierarchyOverride(
+        const syntax::SyntaxNode& definitionSyntax);
 
     /// Gets the set of syntax trees that have been added to the compilation.
     std::span<const std::shared_ptr<syntax::SyntaxTree>> getSyntaxTrees() const;

@@ -156,10 +156,12 @@ public:
     static Symbol& createDefaultNested(const Scope& scope,
                                        const syntax::ModuleDeclarationSyntax& syntax);
 
-    /// Creates an intentionally invalid instance by forcing all parameters to null values.
-    /// This allows type checking instance members as long as they don't depend on any parameters.
-    static InstanceSymbol& createInvalid(Compilation& compilation,
-                                         const DefinitionSymbol& definition);
+    /// Creates an intentionally invalid instance by forcing all parameters without hierarchy
+    /// overrides to null values. This allows type checking instance members as long as they don't
+    /// depend on any unavailable parameters.
+    static InstanceSymbol& createInvalid(
+        Compilation& compilation, const DefinitionSymbol& definition,
+        const HierarchyOverrideNode* hierarchyOverrideNode = nullptr);
 
     static bool isKind(SymbolKind kind) { return kind == SymbolKind::Instance; }
 

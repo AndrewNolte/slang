@@ -1335,8 +1335,9 @@ static const SyntaxNode* findOverrideNodeSource(const HierarchyOverrideNode& nod
     // caused us to have this override node.
     if (!node.paramOverrides.empty()) {
         for (auto& [_, val] : node.paramOverrides) {
-            if (val.defparam)
-                return val.defparam;
+            auto* valueOverride = std::get_if<HierarchyOverrideNode::ValueParamOverride>(&val);
+            if (valueOverride && valueOverride->defparam)
+                return valueOverride->defparam;
         }
     }
 
