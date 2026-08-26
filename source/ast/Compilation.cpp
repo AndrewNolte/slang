@@ -247,6 +247,16 @@ void Compilation::addSyntaxTree(std::shared_ptr<SyntaxTree> tree) {
     cachedParseDiagnostics.reset();
 }
 
+HierarchyOverrideNode& Compilation::getOrAddTopLevelHierarchyOverride(
+    const SyntaxNode& definitionSyntax) {
+    SLANG_ASSERT(!isFrozen());
+
+    if (finalized)
+        SLANG_THROW(std::logic_error("The compilation has already been finalized"));
+
+    return hierarchyOverrides.childNodes[definitionSyntax];
+}
+
 std::span<const std::shared_ptr<SyntaxTree>> Compilation::getSyntaxTrees() const {
     return syntaxTrees;
 }
@@ -552,8 +562,16 @@ const RootSymbol& Compilation::getRoot(bool skipDefParamsAndBinds) {
     // For unreferenced definitions, go through and instantiate them with all empty
     // parameter values so that we get at least some semantic checking of the contents.
     if (!hasFlag(CompilationFlags::IgnoreUninstantiatedModules)) {
-        for (auto def : unreferencedDefs)
-            root->addMember(InstanceSymbol::createInvalid(*this, *def));
+        for (auto def : unreferencedDefs) {
+            const HierarchyOverrideNode* hierarchyOverrideNode = nullptr;
+            if (auto* syntax = def->getSyntax()) {
+                if (auto it = hierarchyOverrides.childNodes.find(*syntax);
+                    it != hierarchyOverrides.childNodes.end()) {
+                    hierarchyOverrideNode = &it->second;
+                }
+            }
+            root->addMember(InstanceSymbol::createInvalid(*this, *def, hierarchyOverrideNode));
+        }
     }
 
     root->topInstances = topList.copy(*this);
@@ -1877,7 +1895,7 @@ void Compilation::parseParamOverrides(
                             ExpressionSyntax::isKind(treeRoot.kind)) {
 
                             paramOverrideTrees.push_back(std::move(tree));
-                            results.emplace(name, HierarchyOverrideNode::ParamOverride{
+                            results.emplace(name, HierarchyOverrideNode::ValueParamOverride{
                                                       ConstantValue{},
                                                       &treeRoot.as<ExpressionSyntax>(), nullptr});
                             continue;

@@ -177,7 +177,27 @@ const ParameterSymbolBase& ParameterBuilder::createParam(
         }
 
         auto& tt = param->targetType;
-        if (newInitializer) {
+        const Type* overrideType = nullptr;
+        const DataTypeSyntax* overrideTypeSyntax = nullptr;
+        const SyntaxNode* paramSyntax = decl.hasSyntax ? decl.typeDecl : param->getSyntax();
+        if (overrideNode && paramSyntax && !isFromConfig) {
+            if (auto it = overrideNode->paramOverrides.find(paramSyntax);
+                it != overrideNode->paramOverrides.end()) {
+                if (auto* typeOverride = std::get_if<HierarchyOverrideNode::TypeParamOverride>(
+                        &it->second)) {
+                    overrideType = typeOverride->type;
+                    overrideTypeSyntax = typeOverride->syntax;
+                }
+            }
+        }
+
+        if (overrideType) {
+            tt.addFlags(DeclaredTypeFlags::TypeOverridden);
+            if (overrideTypeSyntax)
+                tt.setTypeSyntax(*overrideTypeSyntax);
+            tt.setType(*overrideType);
+        }
+        else if (newInitializer) {
             // If this is a NameSyntax, the parser didn't know we were assigning to
             // a type parameter, so fix it up into a NamedTypeSyntax to get a type from it.
             tt.addFlags(DeclaredTypeFlags::TypeOverridden);
@@ -213,7 +233,7 @@ const ParameterSymbolBase& ParameterBuilder::createParam(
 
         newScope.addMember(*param);
 
-        if (!param->isLocalParam()) {
+        if (!param->isLocalParam() && !overrideType) {
             if (forceInvalidValues) {
                 tt.setType(comp.getErrorType());
             }
@@ -276,19 +296,22 @@ const ParameterSymbolBase& ParameterBuilder::createParam(
         if (auto paramSyntax = param->getSyntax(); overrideNode && paramSyntax && !isFromConfig) {
             if (auto it = overrideNode->paramOverrides.find(paramSyntax);
                 it != overrideNode->paramOverrides.end()) {
+                auto* valueOverride = std::get_if<HierarchyOverrideNode::ValueParamOverride>(
+                    &it->second);
+                if (valueOverride) {
+                    // If there is an expression tree here use that as the initializer syntax.
+                    // Otherwise we expect the value to override is already evaluated.
+                    if (!valueOverride->expr) {
+                        param->setValue(comp, valueOverride->value,
+                                        /* needsCoercion */ valueOverride->defparam == nullptr);
+                        return *param;
+                    }
 
-                // If there is an expression tree here use that as the initializer syntax.
-                // Otherwise we expect the value to override is already evaluated.
-                if (!it->second.expr) {
-                    param->setValue(comp, it->second.cv,
-                                    /* needsCoercion */ it->second.defparam == nullptr);
-                    return *param;
+                    // Fall through to the logic below that will evaluate the initializer.
+                    newInitializer = valueOverride->expr;
+                    param->setInitializerSyntax(*newInitializer,
+                                                newInitializer->getFirstToken().location());
                 }
-
-                // Fall through to the logic below that will evaluate the initializer.
-                newInitializer = it->second.expr;
-                param->setInitializerSyntax(*newInitializer,
-                                            newInitializer->getFirstToken().location());
             }
         }
 

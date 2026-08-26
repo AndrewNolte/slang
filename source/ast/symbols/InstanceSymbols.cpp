@@ -458,12 +458,12 @@ Symbol& InstanceSymbol::createDefaultNested(const Scope& scope,
     return result;
 }
 
-InstanceSymbol& InstanceSymbol::createInvalid(Compilation& comp,
-                                              const DefinitionSymbol& definition) {
+InstanceSymbol& InstanceSymbol::createInvalid(Compilation& comp, const DefinitionSymbol& definition,
+                                              const HierarchyOverrideNode* hierarchyOverrideNode) {
     // Give this instance an empty name so that it can't be referenced by name.
     auto& body = InstanceBodySymbol::fromDefinition(comp, definition, definition.location,
-                                                    InstanceFlags::Uninstantiated, nullptr, nullptr,
-                                                    nullptr);
+                                                    InstanceFlags::Uninstantiated,
+                                                    hierarchyOverrideNode, nullptr, nullptr);
     return *comp.emplace<InstanceSymbol>("", SourceLocation::NoLocation, body, 0u);
 }
 
@@ -1086,6 +1086,7 @@ static Symbol* recurseDefaultIfaceInst(Compilation& comp, const InterfacePortSym
                                        const InstanceSymbol*& firstInst,
                                        std::span<const IfaceParamAssignment> paramAssignments,
                                        const ASTContext& assignmentContext,
+                                       const HierarchyOverrideNode* overrideNode,
                                        std::span<const ConstantRange>::iterator it,
                                        std::span<const ConstantRange>::iterator end) {
     if (it == end) {
@@ -1095,6 +1096,7 @@ static Symbol* recurseDefaultIfaceInst(Compilation& comp, const InterfacePortSym
             paramBuilder.setSuppressErrors(true);
         }
 
+        paramBuilder.setOverrides(overrideNode);
         paramBuilder.setInstanceContext(assignmentContext);
         for (auto& assignment : paramAssignments)
             paramBuilder.addAssignment(assignment.paramName, *assignment.constraintExpr);
@@ -1116,7 +1118,7 @@ static Symbol* recurseDefaultIfaceInst(Compilation& comp, const InterfacePortSym
     SmallVector<const Symbol*> elements;
     for (uint32_t i = 0; i < range.width(); i++) {
         auto symbol = recurseDefaultIfaceInst(comp, port, firstInst, paramAssignments,
-                                              assignmentContext, it, end);
+                                              assignmentContext, overrideNode, it, end);
         symbol->name = "";
         elements.push_back(symbol);
     }
@@ -1167,12 +1169,22 @@ void InstanceSymbol::connectDefaultIfacePorts() const {
                     paramAssignments = it->second;
                 }
 
+                const HierarchyOverrideNode* overrideNode = nullptr;
+                if (body.hierarchyOverrideNode) {
+                    if (auto* syntax = port->getSyntax()) {
+                        auto it = body.hierarchyOverrideNode->childNodes.find(*syntax);
+                        if (it != body.hierarchyOverrideNode->childNodes.end())
+                            overrideNode = &it->second;
+                    }
+                }
+
                 Symbol* inst;
                 const ModportSymbol* modport = nullptr;
                 if (auto dims = ifacePort.getDeclaredRange()) {
                     const InstanceSymbol* firstInst = nullptr;
                     inst = recurseDefaultIfaceInst(comp, ifacePort, firstInst, paramAssignments,
-                                                   assignmentContext, dims->begin(), dims->end());
+                                                   assignmentContext, overrideNode, dims->begin(),
+                                                   dims->end());
 
                     if (firstInst) {
                         auto portRange = SourceRange{port->location,
