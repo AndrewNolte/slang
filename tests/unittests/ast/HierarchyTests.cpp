@@ -811,6 +811,62 @@ endmodule
     CHECK(diags[0].code == diag::MaxInstanceDepthExceeded);
 }
 
+TEST_CASE("Max instance depth does not stop diagnostic traversal") {
+    auto tree = SyntaxTree::fromText(R"(
+module recursive #(parameter int count = 0);
+    recursive #(.count(count + 1)) next();
+endmodule
+
+module a_deep;
+    recursive recursive_i();
+endmodule
+
+module z_broken;
+    initial missing = 1;
+endmodule
+)");
+
+    CompilationOptions options;
+    options.maxInstanceDepth = 3;
+
+    Compilation compilation(options);
+    compilation.addSyntaxTree(tree);
+
+    auto& diags = compilation.getAllDiagnostics();
+    REQUIRE(diags.size() == 2);
+    CHECK(diags[0].code == diag::MaxInstanceDepthExceeded);
+    CHECK(diags[1].code == diag::UndeclaredIdentifier);
+}
+
+TEST_CASE("Force elaboration checks instance parameter assignments") {
+    auto tree = SyntaxTree::fromText(R"(
+module child #(parameter int value = 0);
+endmodule
+
+module top;
+    child #(.value(missing)) child_i();
+endmodule
+)");
+
+    CompilationOptions options;
+    options.maxInstanceDepth = 0;
+
+    Compilation compilation(options);
+    compilation.addSyntaxTree(tree);
+
+    auto& root = compilation.getRoot();
+    REQUIRE(root.topInstances.size() == 1);
+    compilation.forceElaborate(root.topInstances[0]->body);
+
+    auto& diags = compilation.getAllDiagnostics();
+    REQUIRE(diags.size() == 2);
+    CHECK(std::ranges::any_of(diags,
+                              [](auto& d) { return d.code == diag::UndeclaredIdentifier; }));
+    CHECK(std::ranges::any_of(diags, [](auto& d) {
+        return d.code == diag::MaxInstanceDepthExceeded;
+    }));
+}
+
 TEST_CASE("Generate loops -- too many iterations") {
     auto tree = SyntaxTree::fromText(R"(
 module bar;

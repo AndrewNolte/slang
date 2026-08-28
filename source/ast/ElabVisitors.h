@@ -23,7 +23,9 @@ struct DiagnosticVisitor : public ASTVisitor<DiagnosticVisitor> {
     DiagnosticVisitor(Compilation& compilation, const size_t& numErrors, uint32_t errorLimit) :
         compilation(compilation), numErrors(numErrors), errorLimit(errorLimit) {}
 
-    bool finishedEarly() const { return numErrors > errorLimit || hierarchyProblem; }
+    bool finishedEarly() const {
+        return numErrors > errorLimit || hierarchyProblem || abortCurrentRoot;
+    }
 
     template<typename T>
     void handle(const T& symbol) {
@@ -56,6 +58,16 @@ struct DiagnosticVisitor : public ASTVisitor<DiagnosticVisitor> {
 
         visitDefault(symbol);
         return true;
+    }
+
+    void handle(const RootSymbol& symbol) {
+        for (auto& member : symbol.members()) {
+            member.visit(*this);
+            if (abortCurrentRoot)
+                abortCurrentRoot = false;
+            else if (finishedEarly())
+                return;
+        }
     }
 
     void handle(const ExplicitImportSymbol& symbol) {
@@ -320,8 +332,11 @@ struct DiagnosticVisitor : public ASTVisitor<DiagnosticVisitor> {
         for (auto conn : symbol.getPortConnections())
             conn->getExpression();
 
-        if (!visitInstances)
+        if (!visitInstances) {
+            for (auto* parameter : symbol.body.getParameters())
+                parameter->symbol.visit(*this);
             return;
+        }
 
         // In order to avoid "effectively infinite" recursions, where parameter values
         // are changing but the numbers are so huge that we would run for almost forever,
@@ -333,7 +348,8 @@ struct DiagnosticVisitor : public ASTVisitor<DiagnosticVisitor> {
                                                           symbol.location);
             diag << symbol.getDefinition().getKindString();
             diag << compilation.getOptions().maxInstanceDepth;
-            hierarchyProblem = true;
+            instanceDepthExceeded = true;
+            abortCurrentRoot = true;
             return;
         }
 
@@ -612,6 +628,8 @@ struct DiagnosticVisitor : public ASTVisitor<DiagnosticVisitor> {
     bool visitInstances = true;
     bool disableCache = false;
     bool hierarchyProblem = false;
+    bool instanceDepthExceeded = false;
+    bool abortCurrentRoot = false;
     flat_hash_map<InstanceCacheKey, InstanceCacheEntry> instanceCache;
     flat_hash_set<const InstanceBodySymbol*> activeInstanceBodies;
     flat_hash_set<const DefinitionSymbol*> usedIfacePorts;
