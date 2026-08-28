@@ -1507,10 +1507,10 @@ void Compilation::elaborate() {
     DiagnosticVisitor elabVisitor(*this, numErrors, errorLimit);
     rootSym.visit(elabVisitor);
 
-    if (!elabVisitor.finishedEarly())
+    if (!elabVisitor.finishedEarly() && !elabVisitor.instanceDepthExceeded)
         elabVisitor.finalize();
 
-    if (elabVisitor.finishedEarly()) {
+    if (elabVisitor.finishedEarly() || elabVisitor.instanceDepthExceeded) {
         sawFatalError = true;
         return;
     }
