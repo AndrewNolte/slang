@@ -281,6 +281,190 @@ std::vector<const ValueDriver*> AnalysisManager::getDrivers(const ValueSymbol& s
     return driverTracker.getDrivers(symbol);
 }
 
+const ast::InstanceBodySymbol& AnalysisManager::getCanonicalBody(
+    ast::InstanceBodySymbol const& body) {
+    if (auto it = canonicalBodyCache.find(&body); it != canonicalBodyCache.end()) {
+        return *it->second.canonicalAnchor;
+    }
+
+    // Walk up looking for an anchor: an enclosing body whose canonical
+    // we already know, either because slang set it via setCanonicalBody
+    // (the outermost non-canonical instance) or because we cached it on
+    // a previous query.
+    // If an instance is nested within another instance which is non-canonical,
+    // slang will not set the canonical body of the nested instance, so it's
+    // not sufficient to look at the first-level parent.
+    ast::InstanceBodySymbol const* cur = &body;
+    ast::InstanceBodySymbol const* anchor = nullptr;
+    ast::InstanceBodySymbol const* anchorCanonical = nullptr;
+    while (cur != nullptr) {
+        if (auto it = canonicalBodyCache.find(cur); it != canonicalBodyCache.end()) {
+            anchor = cur;
+            anchorCanonical = it->second.canonicalAnchor;
+            break;
+        }
+        if (cur->parentInstance != nullptr) {
+            auto const* direct = cur->parentInstance->getCanonicalBody();
+            if (direct != nullptr && direct != cur) {
+                anchor = cur;
+                anchorCanonical = direct;
+                break;
+            }
+        }
+        auto const* parentScope = cur->parentInstance != nullptr
+                                      ? cur->parentInstance->getParentScope()
+                                      : nullptr;
+        if (parentScope == nullptr) {
+            break;
+        }
+        cur = parentScope->getContainingInstance();
+    }
+
+    if (anchor == nullptr || anchorCanonical == anchor) {
+        // No redirect along the chain; body is canonical.
+        canonicalBodyCache.emplace(&body, CanonicalBodyMapping{.canonicalAnchor = &body});
+        return body;
+    }
+
+    // Pair anchor with its canonical, then traverse the subtree to
+    // register every nested body and value pair. After this, the lookup
+    // for `body` should hit the cache.
+    canonicalBodyCache.emplace(anchor, CanonicalBodyMapping{.canonicalAnchor = anchorCanonical});
+    populatePairedBodies(*anchor, *anchorCanonical, *anchor);
+
+    if (auto it = canonicalBodyCache.find(&body); it != canonicalBodyCache.end()) {
+        return *it->second.canonicalAnchor;
+    }
+    // Defensive: structural mismatch between anchor and its canonical
+    // (shouldn't happen given slang's cache-key invariants, but fall
+    // back to identity rather than asserting).
+    canonicalBodyCache.emplace(&body, CanonicalBodyMapping{.canonicalAnchor = &body});
+    return body;
+}
+
+const ast::ValueSymbol& AnalysisManager::getCanonicalValueSymbol(ast::ValueSymbol const& symbol) {
+    if (auto it = canonicalValueCache.find(&symbol); it != canonicalValueCache.end()) {
+        return *it->second;
+    }
+    // Resolving the containing body's canonical fans out to populate
+    // canonicalValueCache for every value pair under that body, so most
+    // subsequent lookups are O(1) hash hits.
+    if (auto const* scope = symbol.getParentScope()) {
+        if (auto const* body = scope->getContainingInstance()) {
+            getCanonicalBody(*body);
+            if (auto it = canonicalValueCache.find(&symbol); it != canonicalValueCache.end()) {
+                return *it->second;
+            }
+        }
+    }
+    // Either the symbol has no enclosing body or no redirect was found
+    // — memoize identity so the slow path runs at most once per symbol.
+    canonicalValueCache.emplace(&symbol, &symbol);
+    return symbol;
+}
+
+void AnalysisManager::populatePairedBodies(const ast::Scope& local, const ast::Scope& canonical,
+                                           const ast::InstanceBodySymbol& mappingBody) {
+    canonicalBodyCache.at(&mappingBody)
+        .canonicalToLocal.emplace(&canonical.asSymbol(), &local.asSymbol());
+
+    auto localIt = local.members().begin();
+    auto localEnd = local.members().end();
+    auto canonIt = canonical.members().begin();
+    auto canonEnd = canonical.members().end();
+    for (; localIt != localEnd && canonIt != canonEnd; ++localIt, ++canonIt) {
+        if (localIt->kind != canonIt->kind) {
+            continue;
+        }
+
+        // Value symbols are needed for target and fallback leaf translation;
+        // all other corresponding members are recorded so a driver's
+        // canonical containing block can be replaced by the local block.
+        canonicalBodyCache.at(&mappingBody).canonicalToLocal.emplace(&*canonIt, &*localIt);
+
+        if (localIt->isValue() && canonIt->isValue()) {
+            canonicalValueCache.emplace(&localIt->as<ast::ValueSymbol>(),
+                                        &canonIt->as<ast::ValueSymbol>());
+            continue;
+        }
+        if (localIt->kind == ast::SymbolKind::Instance &&
+            canonIt->kind == ast::SymbolKind::Instance) {
+            auto const& li = localIt->as<ast::InstanceSymbol>();
+            auto const& ci = canonIt->as<ast::InstanceSymbol>();
+            if (&li.body != &ci.body) {
+                // An instance of module A nested in the body of the canonical
+                // instance of module B may not be the canonical instance of A.
+                auto const& ciCanonBody = getCanonicalBody(ci.body);
+                canonicalBodyCache.emplace(&li.body,
+                                           CanonicalBodyMapping{.canonicalAnchor = &ciCanonBody});
+                populatePairedBodies(li.body, ciCanonBody, li.body);
+            }
+            else {
+                canonicalBodyCache.emplace(&li.body,
+                                           CanonicalBodyMapping{.canonicalAnchor = &li.body});
+            }
+            continue;
+        }
+        if (localIt->kind == ast::SymbolKind::GenerateBlock) {
+            populatePairedBodies(localIt->as<ast::GenerateBlockSymbol>(),
+                                 canonIt->as<ast::GenerateBlockSymbol>(), mappingBody);
+        }
+        else if (localIt->kind == ast::SymbolKind::GenerateBlockArray) {
+            populatePairedBodies(localIt->as<ast::GenerateBlockArraySymbol>(),
+                                 canonIt->as<ast::GenerateBlockArraySymbol>(), mappingBody);
+        }
+        else if (localIt->kind == ast::SymbolKind::InstanceArray) {
+            // Array of instances (e.g. `sub u[4](...)`); recurse so each
+            // element's instance body is paired with its canonical.
+            populatePairedBodies(localIt->as<ast::InstanceArraySymbol>(),
+                                 canonIt->as<ast::InstanceArraySymbol>(), mappingBody);
+        }
+    }
+}
+
+std::vector<const ValueDriver*> AnalysisManager::getDriversForInstance(const ValueSymbol& symbol) {
+    if (localizedDriverSymbols.contains(&symbol)) {
+        return driverTracker.getDrivers(symbol);
+    }
+
+    auto const& canonicalSymbol = getCanonicalValueSymbol(symbol);
+    if (&canonicalSymbol == &symbol) {
+        return driverTracker.getDrivers(symbol);
+    }
+
+    std::vector<const analysis::ValueDriver*> localizedDrivers;
+    // The symbol is not canonical so it must have a containing instance and a
+    // canonicalBodyCache entry from the getCanonicalValueSymbol call.
+    auto const* scope = symbol.getParentScope();
+    SLANG_ASSERT(scope);
+    auto const* localBody = scope->getContainingInstance();
+    SLANG_ASSERT(localBody);
+    const CanonicalBodyMapping& localMapping = canonicalBodyCache.at(localBody);
+
+    auto& state = getState();
+    for (auto* canonicalDriver : driverTracker.getDrivers(canonicalSymbol)) {
+        if (canonicalDriver->flags.has(slang::analysis::DriverFlags::FromSideEffect)) {
+            continue;
+        }
+        auto containingIt = localMapping.canonicalToLocal.find(canonicalDriver->containingSymbol);
+        if (containingIt == localMapping.canonicalToLocal.end()) {
+            continue;
+        }
+
+        auto* localContaining = containingIt->second;
+        ast::EvalContext evalContext(*localContaining);
+        auto* localDriver = analysis::ValueDriver::create(state.context.alloc, evalContext,
+                                                          *canonicalDriver, symbol);
+        localDriver->containingSymbol = localContaining;
+        localDriver->flags |= DriverFlags::FromSideEffect;
+        localizedDrivers.push_back(localDriver);
+    }
+
+    driverTracker.add(state.context, state.driverAlloc, localizedDrivers);
+    localizedDriverSymbols.emplace(&symbol);
+    return driverTracker.getDrivers(symbol);
+}
+
 std::optional<InstanceDriverState> AnalysisManager::getInstanceDriverState(
     const InstanceBodySymbol& symbol) const {
     return driverTracker.getInstanceState(symbol);

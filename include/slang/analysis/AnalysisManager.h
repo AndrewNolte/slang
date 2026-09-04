@@ -141,6 +141,10 @@ public:
     /// Returns all of the known drivers for the given symbol.
     std::vector<const ValueDriver*> getDrivers(const ast::ValueSymbol& symbol) const;
 
+    /// Returns all of the known drivers for the given symbol, including symbols
+    /// inside non-canonical instances. Not thread-safe.
+    std::vector<const ValueDriver*> getDriversForInstance(const ast::ValueSymbol& symbol);
+
     /// Return the driver state tracked per canonical instance.
     std::optional<InstanceDriverState> getInstanceDriverState(
         const ast::InstanceBodySymbol& symbol) const;
@@ -207,6 +211,13 @@ private:
         WorkerState(AnalysisManager& manager) : context(manager), driverAlloc(context.alloc) {}
     };
 
+    // Canonical instance body and mappings from symbols in the canonical body
+    // back to the corresponding symbols in a non-canonical instance.
+    struct CanonicalBodyMapping {
+        const ast::InstanceBodySymbol* canonicalAnchor;
+        flat_hash_map<const ast::Symbol*, const ast::Symbol*> canonicalToLocal;
+    };
+
     const AnalyzedScope& analyzeScopeBlocking(const ast::Scope& scope,
                                               const AnalyzedProcedure* parentProcedure = nullptr);
     void analyzeSymbolAsync(const ast::Symbol& symbol);
@@ -241,6 +252,18 @@ private:
     void handleAssertion(std::unique_ptr<AnalyzedAssertion>&& assertion);
     void wait();
     WorkerState& getState();
+
+    void populatePairedBodies(const ast::Scope& local, const ast::Scope& canonical,
+                              const ast::InstanceBodySymbol& mappingBody);
+    const ast::InstanceBodySymbol& getCanonicalBody(ast::InstanceBodySymbol const& body);
+    const ast::ValueSymbol& getCanonicalValueSymbol(ast::ValueSymbol const& symbol);
+
+    // Maps value symbols in non-canonical instances to their counterpart in the canonical instance.
+    flat_hash_map<ast::ValueSymbol const*, ast::ValueSymbol const*> canonicalValueCache;
+    // Maps non-canonical instance bodies to their canonical counterpart.
+    flat_hash_map<ast::InstanceBodySymbol const*, CanonicalBodyMapping> canonicalBodyCache;
+    // Tracks non-canonical symbols whose canonical drivers have been localized and registered.
+    flat_hash_set<ast::ValueSymbol const*> localizedDriverSymbols;
 
     const AnalysisOptions options;
     std::vector<WorkerState> workerStates;
