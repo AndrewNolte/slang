@@ -456,7 +456,6 @@ std::vector<const ValueDriver*> AnalysisManager::getDriversForInstance(const Val
         auto* localDriver = analysis::ValueDriver::create(state.context.alloc, evalContext,
                                                           *canonicalDriver, symbol);
         localDriver->containingSymbol = localContaining;
-        localDriver->flags |= DriverFlags::FromSideEffect;
         localizedDrivers.push_back(localDriver);
     }
 
