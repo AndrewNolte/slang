@@ -167,6 +167,22 @@ static void checkMacroRecovery(Token token) {
     CHECK(token.trivia()[0].syntax()->kind == SyntaxKind::MacroUsage);
 }
 
+static void checkMacroUsageTrivia(Token token) {
+    REQUIRE(!token.trivia().empty());
+    CHECK(token.trivia()[0].kind == TriviaKind::Directive);
+    REQUIRE(token.trivia()[0].syntax());
+    CHECK(token.trivia()[0].syntax()->kind == SyntaxKind::MacroUsage);
+}
+
+static void checkSkippedEqualsTrivia(Token token) {
+    REQUIRE(token.trivia().size() >= 2);
+    CHECK(token.trivia()[1].kind == TriviaKind::SkippedTokens);
+
+    auto skipped = token.trivia()[1].getSkippedTokens();
+    REQUIRE(!skipped.empty());
+    CHECK(skipped[0].kind == TokenKind::Equals);
+}
+
 static void checkUnknownDirectiveDiagnostics(const Diagnostics& diagnostics,
                                              size_t expectedCount = 1) {
     REQUIRE(diagnostics.size() == expectedCount);
@@ -1927,6 +1943,250 @@ endmodule
     checkMacroRecovery(header.dataType->as<ImplicitTypeSyntax>().placeholder);
 }
 
+TEST_CASE("Undefined standalone macros become empty members") {
+    auto tree = SyntaxTree::fromText(R"(
+module top;
+    (* keep = 1 *) `MACRO_A(x)
+    `MACRO_B(y)
+    logic data;
+endmodule
+)");
+
+    checkUnknownDirectiveDiagnostics(tree->diagnostics(), 2);
+
+    auto& module = tree->root().as<ModuleDeclarationSyntax>();
+    REQUIRE(module.members.size() == 3);
+
+    auto& first = module.members[0]->as<EmptyMemberSyntax>();
+    CHECK(first.attributes.size() == 1);
+    checkMacroRecovery(first.semi);
+
+    auto& second = module.members[1]->as<EmptyMemberSyntax>();
+    checkMacroRecovery(second.semi);
+
+    CHECK(module.members[2]->kind == SyntaxKind::DataDeclaration);
+}
+
+TEST_CASE("Adjacent undefined macros on one line each become empty members") {
+    // Two unknown macros sharing a source line used to be fabricated into a
+    // single DataDeclaration whose type and declarator slots held the macros
+    // as trivia. Now the parser treats each as its own EmptyMember so the
+    // tree round-trips cleanly through tools that preserve unexpanded macros.
+    auto tree = SyntaxTree::fromText(R"(
+module top;
+    `MACRO_A(x)   `MACRO_B(y)
+    logic data;
+endmodule
+)");
+
+    checkUnknownDirectiveDiagnostics(tree->diagnostics(), 2);
+
+    auto& module = tree->root().as<ModuleDeclarationSyntax>();
+    REQUIRE(module.members.size() == 3);
+
+    auto& first = module.members[0]->as<EmptyMemberSyntax>();
+    checkMacroRecovery(first.semi);
+
+    auto& second = module.members[1]->as<EmptyMemberSyntax>();
+    checkMacroRecovery(second.semi);
+
+    CHECK(module.members[2]->kind == SyntaxKind::DataDeclaration);
+}
+
+TEST_CASE("Undefined standalone macros become empty statements") {
+    auto tree = SyntaxTree::fromText(R"(
+module top;
+    function void f();
+        `MACRO_STMT(x)
+        a = b;
+    endfunction
+endmodule
+)");
+
+    checkUnknownDirectiveDiagnostics(tree->diagnostics());
+
+    auto& module = tree->root().as<ModuleDeclarationSyntax>();
+    auto& func = module.members[0]->as<FunctionDeclarationSyntax>();
+    REQUIRE(func.items.size() == 2);
+
+    auto& empty = func.items[0]->as<EmptyStatementSyntax>();
+    checkMacroRecovery(empty.semicolon);
+
+    CHECK(func.items[1]->kind == SyntaxKind::ExpressionStatement);
+}
+
+TEST_CASE("Semicolon terminated undefined macros become empty syntax") {
+    auto tree = SyntaxTree::fromText(R"(
+module top;
+    `MEMBER_MACRO(a);
+    function void f();
+        `STMT_MACRO(b);
+    endfunction
+endmodule
+)");
+
+    checkUnknownDirectiveDiagnostics(tree->diagnostics(), 2);
+
+    auto& module = tree->root().as<ModuleDeclarationSyntax>();
+    REQUIRE(module.members.size() == 2);
+
+    auto& member = module.members[0]->as<EmptyMemberSyntax>();
+    CHECK(member.semi.kind == TokenKind::Semicolon);
+    CHECK(!member.semi.isRecovery());
+    checkMacroUsageTrivia(member.semi);
+
+    auto& func = module.members[1]->as<FunctionDeclarationSyntax>();
+    REQUIRE(func.items.size() == 1);
+
+    auto& stmt = func.items[0]->as<EmptyStatementSyntax>();
+    CHECK(stmt.semicolon.kind == TokenKind::Semicolon);
+    CHECK(!stmt.semicolon.isRecovery());
+    checkMacroUsageTrivia(stmt.semicolon);
+}
+
+TEST_CASE("Undefined macro assignment tails stay with empty syntax") {
+    auto tree = SyntaxTree::fromText(R"(
+module top;
+    `MEMBER_MACRO(a) = rhs;
+    function void f();
+        `STMT_MACRO(b) = rhs;
+    endfunction
+endmodule
+)");
+
+    checkUnknownDirectiveDiagnostics(tree->diagnostics(), 2);
+
+    auto& module = tree->root().as<ModuleDeclarationSyntax>();
+    REQUIRE(module.members.size() == 2);
+
+    auto& member = module.members[0]->as<EmptyMemberSyntax>();
+    CHECK(member.semi.kind == TokenKind::Semicolon);
+    CHECK(!member.semi.isRecovery());
+    checkMacroUsageTrivia(member.semi);
+    checkSkippedEqualsTrivia(member.semi);
+
+    auto& func = module.members[1]->as<FunctionDeclarationSyntax>();
+    REQUIRE(func.items.size() == 1);
+
+    auto& stmt = func.items[0]->as<EmptyStatementSyntax>();
+    CHECK(stmt.semicolon.kind == TokenKind::Semicolon);
+    CHECK(!stmt.semicolon.isRecovery());
+    checkMacroUsageTrivia(stmt.semicolon);
+    checkSkippedEqualsTrivia(stmt.semicolon);
+}
+
+TEST_CASE("Undefined macro assignment recovery stops at blank line") {
+    auto tree = SyntaxTree::fromText(R"(
+module top;
+    `MEMBER_MACRO(a) = rhs
+
+    logic data;
+endmodule
+)");
+
+    checkUnknownDirectiveDiagnostics(tree->diagnostics());
+
+    auto& module = tree->root().as<ModuleDeclarationSyntax>();
+    REQUIRE(module.members.size() == 2);
+
+    auto& member = module.members[0]->as<EmptyMemberSyntax>();
+    CHECK(member.semi.isRecovery());
+    checkMacroUsageTrivia(member.semi);
+    checkSkippedEqualsTrivia(member.semi);
+
+    CHECK(module.members[1]->kind == SyntaxKind::DataDeclaration);
+}
+
+TEST_CASE("Recovery boundaries follow the end of multiline macro invocations") {
+    auto tree = SyntaxTree::fromText(R"(
+module top;
+    `TYPE(a,
+          b) data;
+    `MEMBER(
+        a,
+        b) = rhs;
+    `MEMBER(
+        a,
+        b)
+
+    logic following;
+endmodule
+)");
+
+    checkUnknownDirectiveDiagnostics(tree->diagnostics(), 3);
+    auto& members = tree->root().as<ModuleDeclarationSyntax>().members;
+    REQUIRE(members.size() == 4);
+    auto& declaration = members[0]->as<DataDeclarationSyntax>();
+    REQUIRE(declaration.declarators.size() == 1);
+    CHECK(declaration.declarators[0]->name.valueText() == "data");
+    auto& assignment = members[1]->as<EmptyMemberSyntax>();
+    CHECK(assignment.semi.kind == TokenKind::Semicolon);
+    checkSkippedEqualsTrivia(assignment.semi);
+    CHECK(members[2]->kind == SyntaxKind::EmptyMember);
+    CHECK(members[3]->kind == SyntaxKind::DataDeclaration);
+}
+
+TEST_CASE("Recovery assignment tails count physical line breaks") {
+    for (auto gap :
+         {"\n"sv, "\r\n"sv, "\r"sv, " /* inline */ "sv, " /* one\nline */ "sv, " // comment\n"sv}) {
+        CAPTURE(gap);
+        auto tree = SyntaxTree::fromText("module top; `MACRO(a) = rhs +"s + std::string(gap) +
+                                         "value; logic following; endmodule");
+        checkUnknownDirectiveDiagnostics(tree->diagnostics());
+        auto& members = tree->root().as<ModuleDeclarationSyntax>().members;
+        REQUIRE(members.size() == 2);
+        auto& assignment = members[0]->as<EmptyMemberSyntax>();
+        CHECK(assignment.semi.kind == TokenKind::Semicolon);
+        checkSkippedEqualsTrivia(assignment.semi);
+        CHECK(members[1]->kind == SyntaxKind::DataDeclaration);
+    }
+
+    for (auto gap :
+         {"\n\n"sv, "\r\n\r\n"sv, "\r\r"sv, " /* two\n\nlines */ "sv, " // comment\n\n"sv}) {
+        CAPTURE(gap);
+        auto tree = SyntaxTree::fromText("module top; `MACRO(a) = rhs"s + std::string(gap) +
+                                         "logic following; endmodule");
+        checkUnknownDirectiveDiagnostics(tree->diagnostics());
+        auto& members = tree->root().as<ModuleDeclarationSyntax>().members;
+        REQUIRE(members.size() == 2);
+        CHECK(members[0]->as<EmptyMemberSyntax>().semi.isRecovery());
+        CHECK(members[1]->kind == SyntaxKind::DataDeclaration);
+    }
+}
+
+TEST_CASE("Recovery ignores logical line number remapping") {
+    auto tree = SyntaxTree::fromText(R"(
+module top;
+`line 1000 "source.sv" 0
+    `MACRO(a)
+`line 1 "source.sv" 0
+    logic data;
+    `MACRO(b) = rhs
+`line 10000 "source.sv" 0
+    logic following;
+endmodule
+)");
+    checkUnknownDirectiveDiagnostics(tree->diagnostics(), 2);
+    auto& members = tree->root().as<ModuleDeclarationSyntax>().members;
+    REQUIRE(members.size() == 4);
+    CHECK(members[0]->kind == SyntaxKind::EmptyMember);
+    CHECK(members[1]->kind == SyntaxKind::DataDeclaration);
+    CHECK(members[2]->as<EmptyMemberSyntax>().semi.isRecovery());
+    CHECK(members[3]->kind == SyntaxKind::DataDeclaration);
+}
+
+TEST_CASE("Recovery assignment tails keep included expressions") {
+    TempFile included("rhs\n", ".svh");
+    auto tree = SyntaxTree::fromText("module top;\n `MACRO(a) =\n `include \""s +
+                                     included.path.string() +
+                                     "\"\n ;\n logic following;\n endmodule");
+    checkUnknownDirectiveDiagnostics(tree->diagnostics());
+    auto& members = tree->root().as<ModuleDeclarationSyntax>().members;
+    REQUIRE(members.size() == 2);
+    CHECK(members[0]->as<EmptyMemberSyntax>().semi.kind == TokenKind::Semicolon);
+    CHECK(members[1]->kind == SyntaxKind::DataDeclaration);
+}
+
 TEST_CASE("Undefined macro becomes recovery param assignment in comma list") {
     auto tree = SyntaxTree::fromText(R"(
 module top;
@@ -1994,6 +2254,32 @@ endmodule
     REQUIRE(add.left->kind == SyntaxKind::EmptyIdentifierName);
     checkMacroRecovery(add.left->as<EmptyIdentifierNameSyntax>().placeholder);
     CHECK(add.right->as<IdentifierNameSyntax>().identifier.valueText() == "rhs");
+}
+
+TEST_CASE("Undefined same-line macro expressions remain identifier syntax") {
+    auto tree = SyntaxTree::fromText(R"(
+module top;
+    function void f(int idx, logic data);
+        `MEM_p[idx] = data;
+    endfunction
+endmodule
+)");
+
+    checkUnknownDirectiveDiagnostics(tree->diagnostics());
+
+    auto& module = tree->root().as<ModuleDeclarationSyntax>();
+    auto& func = module.members[0]->as<FunctionDeclarationSyntax>();
+    REQUIRE(func.items.size() == 1);
+
+    auto& stmt = func.items[0]->as<ExpressionStatementSyntax>();
+    REQUIRE(stmt.expr->kind == SyntaxKind::AssignmentExpression);
+
+    auto& assignment = stmt.expr->as<BinaryExpressionSyntax>();
+    REQUIRE(assignment.left->kind == SyntaxKind::ElementSelectExpression);
+
+    auto& select = assignment.left->as<ElementSelectExpressionSyntax>();
+    REQUIRE(select.left->kind == SyntaxKind::EmptyIdentifierName);
+    checkMacroRecovery(select.left->as<EmptyIdentifierNameSyntax>().placeholder);
 }
 
 TEST_CASE("Undefined macro before scope resolution recovers as scoped name") {

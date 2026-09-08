@@ -42,6 +42,13 @@ protected:
     Token missingToken(TokenKind kind, SourceLocation location);
     Token placeholderToken();
 
+    /// Tests for at least @a count physical line breaks between tokens, excluding macro arguments.
+    bool recoveryHasLineBreaks(Token previous, Token next, uint32_t count);
+
+    /// Consumes a standalone recovery macro and optional assignment tail or semicolon.
+    /// Returns an empty token if the macro is part of a declaration or expression.
+    Token consumeRecovery();
+
     Token getLastConsumed() const;
     bool haveDiagAtCurrentLoc();
 

@@ -254,6 +254,8 @@ private:
     AttrList parseAttributes();
     syntax::AttributeSpecSyntax& parseAttributeSpec();
     syntax::MemberSyntax* parseMember(syntax::SyntaxKind parentKind, bool& anyLocalModules);
+    /// Preserve a standalone unexpanded macro without consuming the following member.
+    syntax::MemberSyntax* parseRecoveryMember(AttrList attributes);
     syntax::MemberSyntax* parseMemberImpl(AttrList attributes, syntax::SyntaxKind parentKind, bool& anyLocalModules);
     syntax::ModuleHeaderSyntax& parseModuleHeader();
     syntax::ParameterPortListSyntax* parseParameterPortList();

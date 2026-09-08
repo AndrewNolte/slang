@@ -441,9 +441,7 @@ Token Preprocessor::handleDirectives(Token token) {
                             trivia.push_back(skipped);
                         if (isRecovery) {
                             tokenAfterRecovery = std::exchange(currentToken, Token());
-                            stripLeadingEOLAfterRecovery = true;
-                            return Token::createRecovery(alloc, trivia.copy(alloc),
-                                                         token.location());
+                            return Token::createRecovery(alloc, trivia, token.location());
                         }
                         break;
                     }
@@ -551,28 +549,12 @@ Token Preprocessor::handleDirectives(Token token) {
 }
 
 Token Preprocessor::nextRaw() {
-    auto stripRecoveryEOL = [this](Token token) {
-        if (!stripLeadingEOLAfterRecovery)
-            return token;
-
-        stripLeadingEOLAfterRecovery = false;
-        if (!token)
-            return token;
-
-        auto nextTrivia = token.trivia();
-        if (!nextTrivia.empty() && nextTrivia[0].kind == TriviaKind::EndOfLine) {
-            return token.withTrivia(alloc,
-                                    std::span(nextTrivia.data() + 1, nextTrivia.size() - 1));
-        }
-        return token;
-    };
-
     if (tokenAfterRecovery)
-        return stripRecoveryEOL(std::exchange(tokenAfterRecovery, Token()));
+        return std::exchange(tokenAfterRecovery, Token());
 
     // it's possible we have a token buffered from looking ahead when handling a directive
     if (currentToken)
-        return stripRecoveryEOL(std::exchange(currentToken, Token()));
+        return std::exchange(currentToken, Token());
 
     auto getNext = [&] {
         // if we are expandeding a macro we'll have tokens from that to return
@@ -590,7 +572,7 @@ Token Preprocessor::nextRaw() {
         return lexerStack.back()->lex(keywordVersionStack.back().version);
     };
 
-    auto token = stripRecoveryEOL(getNext());
+    auto token = getNext();
     if (token.kind != TokenKind::EndOfFile)
         return token;
 

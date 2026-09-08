@@ -23,6 +23,9 @@ StatementSyntax& Parser::parseStatement(bool allowEmpty, bool allowSuperNew) {
     }
 
     auto attributes = parseAttributes();
+    if (auto recovery = consumeRecovery())
+        return factory.emptyStatement(label, attributes, recovery);
+
     switch (peek().kind) {
         case TokenKind::UniqueKeyword:
         case TokenKind::Unique0Keyword:
@@ -637,8 +640,12 @@ ActionBlockSyntax& Parser::parseActionBlock() {
     if (peek(TokenKind::ElseKeyword))
         elseClause = parseElseClause();
     else {
+        uint32_t index = 0;
+        if (peek().kind == TokenKind::Identifier && peek(1).kind == TokenKind::Colon)
+            index = 2;
+        bool recoveryAction = scanAttributes(index) && peek(index).isRecovery();
         statement = &parseStatement();
-        if (statement->kind != SyntaxKind::EmptyStatement)
+        if (statement->kind != SyntaxKind::EmptyStatement || recoveryAction)
             elseClause = parseElseClause();
     }
 
@@ -673,7 +680,12 @@ SyntaxList<SyntaxNode> Parser::parseBlockItems(TokenKind endKind, Token& end, bo
         SyntaxNode* newNode = nullptr;
         bool isStmt = false;
 
-        if (isPortDeclaration(/* inStatement */ true)) {
+        if (auto recovery = consumeRecovery()) {
+            newNode = &factory.emptyStatement(nullptr, {}, recovery);
+            isStmt = true;
+            sawStatement = true;
+        }
+        else if (isPortDeclaration(/* inStatement */ true)) {
             newNode = &parsePortDeclaration(parseAttributes());
         }
         else if (isVariableDeclaration()) {

@@ -165,8 +165,17 @@ MemberSyntax* Parser::parseMember(SyntaxKind parentKind, bool& anyLocalModules) 
     return parseMemberImpl(parseAttributes(), parentKind, anyLocalModules);
 }
 
+MemberSyntax* Parser::parseRecoveryMember(AttrList attributes) {
+    if (auto recovery = consumeRecovery())
+        return &factory.emptyMember(attributes, nullptr, recovery);
+    return nullptr;
+}
+
 MemberSyntax* Parser::parseMemberImpl(AttrList attributes, SyntaxKind parentKind,
                                       bool& anyLocalModules) {
+    if (auto member = parseRecoveryMember(attributes))
+        return member;
+
     if (isHierarchyInstantiation(/* requireName */ false))
         return &parseHierarchyInstantiation(attributes);
     if (isPortDeclaration(/* inStatement */ false))
@@ -1314,6 +1323,8 @@ MemberSyntax* Parser::parseClassMember(bool isIfaceClass, bool hasBaseClass) {
     };
 
     auto attributes = parseAttributes();
+    if (auto member = parseRecoveryMember(attributes))
+        return member;
 
     // virtual keyword can either be a class decl, virtual interface, or a method qualifier.
     // Early out here if it's a class.

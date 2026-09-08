@@ -3,6 +3,7 @@
 
 #include "Test.h"
 
+#include "slang/parsing/Preprocessor.h"
 #include "slang/syntax/AllSyntax.h"
 
 TEST_CASE("If statement") {
@@ -390,4 +391,49 @@ TEST_CASE("Empty randsequence case production") {
 
     REQUIRE(diagnostics.size() == 1);
     CHECK(diagnostics[0].code == diag::CaseStatementEmpty);
+}
+
+TEST_CASE("Recovery macro assertion actions retain their else clauses") {
+    PreprocessorOptions options;
+    options.dontExpandMacros = true;
+    for (auto action : {"`ACTION(a)\n"sv, "`ACTION(a);\n"sv, "`ACTION(a) = rhs;\n"sv,
+                        "label: (* keep = 1 *) `ACTION(a)\n"sv}) {
+        CAPTURE(action);
+        auto tree = SyntaxTree::fromText("module top; initial begin assert (1) "s +
+                                             std::string(action) +
+                                             "else $error(\"failed\"); end endmodule",
+                                         options);
+        CHECK(tree->diagnostics().empty());
+        auto& block = tree->root()
+                          .as<ModuleDeclarationSyntax>()
+                          .members[0]
+                          ->as<ProceduralBlockSyntax>()
+                          .statement->as<BlockStatementSyntax>();
+        REQUIRE(block.items.size() == 1);
+        auto& statement = block.items[0]->as<ImmediateAssertionStatementSyntax>();
+        REQUIRE(statement.action->statement);
+        CHECK(statement.action->statement->kind == SyntaxKind::EmptyStatement);
+        REQUIRE(statement.action->elseClause);
+        CHECK(statement.action->elseClause->clause->kind == SyntaxKind::ExpressionStatement);
+    }
+}
+
+TEST_CASE("Empty assertion actions do not consume an enclosing else") {
+    for (auto action : {";"sv, "`EMPTY;"sv}) {
+        CAPTURE(action);
+        auto tree = SyntaxTree::fromText(
+            "`define EMPTY\nmodule top; initial if (enabled) assert (1) "s + std::string(action) +
+            " else $error(\"failed\"); endmodule");
+        CHECK(tree->diagnostics().empty());
+        auto& conditional = tree->root()
+                                .as<ModuleDeclarationSyntax>()
+                                .members[0]
+                                ->as<ProceduralBlockSyntax>()
+                                .statement->as<ConditionalStatementSyntax>();
+        REQUIRE(conditional.elseClause);
+        auto& assertion = conditional.statement->as<ImmediateAssertionStatementSyntax>();
+        REQUIRE(assertion.action->statement);
+        CHECK(assertion.action->statement->kind == SyntaxKind::EmptyStatement);
+        CHECK_FALSE(assertion.action->elseClause);
+    }
 }

@@ -10,6 +10,8 @@
 #include "slang/diagnostics/ParserDiags.h"
 #include "slang/parsing/LexerFacts.h"
 #include "slang/parsing/Preprocessor.h"
+#include "slang/syntax/SyntaxFacts.h"
+#include "slang/text/CharInfo.h"
 #include "slang/util/String.h"
 
 namespace slang::parsing {
@@ -225,6 +227,102 @@ Token ParserBase::missingToken(TokenKind kind, SourceLocation location) {
 
 Token ParserBase::placeholderToken() {
     return Token(alloc, TokenKind::Placeholder, {}, {}, peek().location());
+}
+
+bool ParserBase::recoveryHasLineBreaks(Token previous, Token next, uint32_t count) {
+    auto hasBreaks = [&](std::string_view text) {
+        for (size_t i = 0; i < text.size(); i++) {
+            if (isNewline(text[i])) {
+                if (--count == 0)
+                    return true;
+                if (text[i] == '\r' && i + 1 < text.size() && text[i + 1] == '\n')
+                    i++;
+            }
+        }
+        return false;
+    };
+
+    const auto required = count;
+    if (previous.location().buffer() == next.location().buffer()) {
+        bool structuredTrivia = false;
+        for (auto& trivia : next.trivia()) {
+            if (trivia.syntax() || trivia.kind == TriviaKind::SkippedTokens) {
+                structuredTrivia = true;
+                break;
+            }
+            if (hasBreaks(trivia.getRawText()))
+                return true;
+        }
+        if (!structuredTrivia)
+            return false;
+    }
+
+    // Directives and expanded tokens can carry trivia from other buffers. Use the
+    // physical source gap in this uncommon case, never logical `line numbers.
+    if (previous.isRecovery()) {
+        auto triviaList = previous.trivia();
+        for (auto& trivia : triviaList) {
+            if (auto syntax = trivia.syntax(); syntax && syntax->kind == SyntaxKind::MacroUsage)
+                previous = syntax->getLastToken();
+        }
+    }
+    if (!previous.location() || !next.location())
+        return false;
+
+    auto& sourceManager = getPP().getSourceManager();
+    auto start = sourceManager.getFullyOriginalLoc(previous.location());
+    auto end = sourceManager.getFullyOriginalLoc(next.location());
+    if (start.buffer() != end.buffer())
+        return false;
+
+    auto offset = start.offset() + previous.rawText().size();
+    auto text = sourceManager.getSourceText(start.buffer());
+    if (offset > end.offset() || end.offset() > text.size())
+        return false;
+
+    count = required;
+    return hasBreaks(text.substr(offset, end.offset() - offset));
+}
+
+Token ParserBase::consumeRecovery() {
+    if (!peek().isRecovery())
+        return {};
+
+    auto next = peek(1);
+    if (next.kind != TokenKind::Equals && next.kind != TokenKind::Semicolon &&
+        next.kind != TokenKind::EndOfFile && !SF::isEndKeyword(next.kind) && !next.isRecovery() &&
+        !recoveryHasLineBreaks(peek(), next, 1)) {
+        return {};
+    }
+
+    auto recovery = consume();
+    if (peek(TokenKind::Equals)) {
+        auto previous = recovery;
+        while (!peek(TokenKind::Semicolon) && !peek(TokenKind::EndOfFile) &&
+               !SF::isEndKeyword(peek().kind)) {
+            if (recoveryHasLineBreaks(previous, peek(), 2))
+                break;
+            skipToken(std::nullopt);
+            previous = getLastConsumed();
+        }
+    }
+
+    if (peek(TokenKind::Semicolon)) {
+        auto semi = consume();
+        SmallVector<Trivia, 4> trivia;
+        trivia.append_range(recovery.trivia());
+        trivia.append_range(semi.trivia());
+        return semi.withTrivia(alloc, trivia);
+    }
+
+    if (!skippedTokens.empty()) {
+        SmallVector<Trivia, 4> trivia;
+        trivia.append_range(recovery.trivia());
+        trivia.push_back(Trivia{TriviaKind::SkippedTokens, skippedTokens.copy(alloc)});
+        recovery = recovery.withTrivia(alloc, trivia);
+        skippedTokens.clear();
+    }
+    return recovery;
 }
 
 Token ParserBase::getLastConsumed() const {
