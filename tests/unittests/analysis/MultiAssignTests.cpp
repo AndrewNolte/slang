@@ -679,6 +679,42 @@ endmodule
     CHECK(diags[0].code == diag::MultipleAlwaysAssigns);
 }
 
+TEST_CASE("Nettype analysis driver queries preserve frozen compilations") {
+    auto& code = R"(
+module leaf;
+    function real resolve(input real values[]);
+        return 0.0;
+    endfunction
+    if (0) begin : inactive
+        for (genvar i = 0; i < 2; i++) begin : nested
+            logic value;
+        end
+    end
+endmodule
+module top;
+    leaf first();
+    leaf second();
+    nettype real resolved with second.resolve;
+endmodule
+)";
+    Compilation compilation;
+    AnalysisManager analysisManager;
+    compilation.addSyntaxTree(SyntaxTree::fromText(code));
+    NO_COMPILATION_ERRORS;
+
+    auto& second = compilation.getRoot().lookupName<InstanceSymbol>("top.second");
+    REQUIRE(second.getCanonicalBody());
+    // The hierarchical resolver body must be bound before analysis can visit it.
+    second.body.find<SubroutineSymbol>("resolve").getBody();
+    compilation.freeze();
+
+    CHECK_NOTHROW(analysisManager.analyze(compilation));
+    CHECK(analysisManager.getDiagnostics().empty());
+#if SLANG_ASSERT_ENABLED
+    CHECK(compilation.isFrozen());
+#endif
+}
+
 TEST_CASE("Function arg defaults with multi-driver checking") {
     auto& code = R"(
 int baz, bar, biz;

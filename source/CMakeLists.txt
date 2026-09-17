@@ -67,6 +67,7 @@ add_library(
   ${CMAKE_CURRENT_BINARY_DIR}/slang/diagnostics/AllDiags.h
   analysis/AbstractFlowAnalysis.cpp
   analysis/AnalysisManager.cpp
+  analysis/AnalysisQueries.cpp
   analysis/AnalyzedAssertion.cpp
   analysis/AnalyzedProcedure.cpp
   analysis/CaseDecisionDag.cpp

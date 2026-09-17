@@ -5,6 +5,7 @@
 
 add_executable(
   unittests
+  analysis/AnalysisQueryTests.cpp
   analysis/AssertionAnalysisTests.cpp
   analysis/CaseAnalysisTests.cpp
   analysis/ConstraintAnalysisTests.cpp

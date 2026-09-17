@@ -203,7 +203,7 @@ struct AnalysisScopeVisitor {
 
             auto args = func->getArguments();
             if (args.size() == 1) {
-                auto drivers = manager.getDrivers(*args[0]);
+                auto drivers = manager.driverTracker.getDrivers(*args[0]);
                 if (!drivers.empty()) {
                     auto& diag = context.addDiag(symbol, diag::NTResolveArgModify,
                                                  drivers[0]->getSourceRange());
