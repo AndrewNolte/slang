@@ -143,7 +143,11 @@ public:
     ///       calling `getAllDiagnostics` on it) and frozen before it can be analyzed.
     void analyze(const ast::Compilation& compilation);
 
-    /// Returns all of the known drivers for the given symbol.
+    /// Returns the drivers recorded directly for the given symbol without elaborating it.
+    /// Use AnalysisQueries to include drivers from a non-canonical instance's canonical body.
+    ///
+    /// @note This method can be called concurrently once analyze() has completed,
+    ///       but must not be called concurrently with analyze().
     std::vector<const ValueDriver*> getDrivers(const ast::ValueSymbol& symbol) const;
 
     /// Return the driver state tracked per canonical instance.
