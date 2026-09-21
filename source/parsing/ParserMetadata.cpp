@@ -31,6 +31,7 @@ public:
             syntax.separator.kind == TokenKind::DoubleColon) {
             meta.classPackageNames.push_back(&syntax.left->as<IdentifierNameSyntax>());
         }
+        visitDefault(syntax);
     }
 
     void handle(const PackageImportDeclarationSyntax& syntax) {
@@ -59,6 +60,11 @@ public:
             if (auto identifier = namedType->name->as_if<IdentifierNameSyntax>())
                 meta.namedPortTypes.push_back(identifier);
         }
+        visitDefault(syntax);
+    }
+
+    void handle(const VirtualInterfaceTypeSyntax& syntax) {
+        meta.virtualInterfaceTypes.push_back(&syntax);
         visitDefault(syntax);
     }
 
@@ -220,6 +226,12 @@ void ParserMetadata::visitReferencedSymbols(function_ref<void(std::string_view)>
             if (!name.empty())
                 func(name);
         }
+    }
+
+    for (auto type : virtualInterfaceTypes) {
+        std::string_view name = type->name.valueText();
+        if (!name.empty())
+            func(name);
     }
 
     if (!includePortNames)

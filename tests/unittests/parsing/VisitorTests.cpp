@@ -790,6 +790,33 @@ module interface_port(explicit_if.mp bus); endmodule
     checkMetadata(ParserMetadata::fromSyntax(tree->root()));
 }
 
+TEST_CASE("Parser metadata tracks virtual interface types") {
+    auto tree = SyntaxTree::fromText(R"(
+class client;
+    local virtual field_if vif;
+    typedef virtual interface alias_if alias_t;
+    extern function void set_vif(virtual argument_if bus);
+    virtual interface parameter_if #(types_pkg::WIDTH).monitor parameterized;
+    typedef holder#(virtual nested_if)::value_t scoped_t;
+endclass
+)");
+    REQUIRE(tree->diagnostics().empty());
+
+    for (const auto& metadata : {tree->getMetadata(), ParserMetadata::fromSyntax(tree->root())}) {
+        CHECK(metadata.virtualInterfaceTypes.size() == 5);
+        auto expected = std::vector<std::string_view>{"alias_if",  "argument_if",  "field_if",
+                                                      "nested_if", "parameter_if", "types_pkg"};
+        auto names = metadata.getReferencedSymbols();
+        std::ranges::sort(names);
+        CHECK(names == expected);
+
+        names.clear();
+        metadata.visitReferencedSymbols([&](auto name) { names.push_back(name); }, false);
+        std::ranges::sort(names);
+        CHECK(names == expected);
+    }
+}
+
 TEST_CASE("Syntax rewriter -- replace preserves trivia") {
     auto tree = SyntaxTree::fromText(R"(
 module test(

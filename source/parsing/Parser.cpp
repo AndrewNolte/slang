@@ -570,8 +570,10 @@ DataTypeSyntax& Parser::parseDataType(bitmask<TypeOptions> options) {
             auto interfaceKeyword = consumeIf(TokenKind::InterfaceKeyword);
             auto name = expect(TokenKind::Identifier);
             auto parameters = parseParameterValueAssignment();
-            return factory.virtualInterfaceType(virtualKeyword, interfaceKeyword, name, parameters,
-                                                parseDotMemberClause());
+            auto& result = factory.virtualInterfaceType(virtualKeyword, interfaceKeyword, name,
+                                                        parameters, parseDotMemberClause());
+            meta.virtualInterfaceTypes.push_back(&result);
+            return result;
         }
         case TokenKind::UnitSystemName:
             return factory.namedType(parseName());

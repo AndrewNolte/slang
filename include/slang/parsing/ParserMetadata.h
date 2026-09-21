@@ -49,6 +49,9 @@ struct SLANG_EXPORT ParserMetadata {
     /// A list of all interface port headers parsed.
     std::vector<const syntax::InterfacePortHeaderSyntax*> interfacePorts;
 
+    /// A list of all virtual interface types parsed.
+    std::vector<const syntax::VirtualInterfaceTypeSyntax*> virtualInterfaceTypes;
+
     /// A list of all simple named types used in variable port headers.
     std::vector<const syntax::IdentifierNameSyntax*> namedPortTypes;
 
@@ -76,7 +79,8 @@ struct SLANG_EXPORT ParserMetadata {
     std::vector<std::string_view> getReferencedSymbols() const;
 
     /// Visits all top level symbols referenced/used by this metadata, calling the provided
-    /// function for each symbol name. If @a includePortNames is true, this includes explicit
+    /// function for each symbol name, including virtual interface types.
+    /// If @a includePortNames is true, this includes explicit
     /// interface ports and ambiguous variable port types that can resolve to interfaces or data
     /// types.
     void visitReferencedSymbols(function_ref<void(std::string_view)> func,
