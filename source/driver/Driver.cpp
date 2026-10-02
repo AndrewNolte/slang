@@ -518,7 +518,17 @@ void Driver::addStandardArgs() {
 }
 
 void Driver::issueCommandLineErrors(const CommandLine& cl) {
-    for (auto& err : cl.getErrors()) {
+    auto errors = cl.getErrors();
+    if (&cl == &cmdLine) {
+        const auto count = errors.size();
+        errors = errors.subspan(std::min(issuedCommandLineErrors, count));
+        issuedCommandLineErrors = count;
+    }
+    for (auto& err : errors) {
+        if (err.environmentVariable &&
+            !issuedEnvironmentVariables.insert(*err.environmentVariable).second) {
+            continue;
+        }
         auto loc = err.location;
         if (!loc)
             loc = SourceLocation::NoLocation;
@@ -1391,6 +1401,7 @@ bool Driver::runFullCompilation(bool quiet) {
 
 bool Driver::parseUnitListing(const SourceBuffer& buffer) {
     CommandLine unitCmdLine;
+    unitCmdLine.environmentOverrides = cmdLine.environmentOverrides;
     std::vector<std::string> includes;
     unitCmdLine.add("-I,--incdir,--include-directory,+incdir", includes, "", "",
                     CommandLineFlags::CommaList);

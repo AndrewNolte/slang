@@ -121,7 +121,7 @@ void SourceLoader::addLibraryMapsInternal(std::string_view pattern, const fs::pa
                                           flat_hash_set<fs::path>& seenMaps) {
     SmallVector<fs::path> files;
     std::error_code ec;
-    svGlob(basePath, pattern, GlobMode::Files, files, expandEnvVars, ec);
+    svGlob(basePath, pattern, GlobMode::Files, files, expandEnvVars, ec, environmentOverrides);
 
     if (ec) {
         addError(pattern, ec);
@@ -511,7 +511,8 @@ void SourceLoader::addFilesInternal(std::string_view pattern, const fs::path& ba
                                     const UnitEntry* unit, bool expandEnvVars) {
     SmallVector<fs::path> files;
     std::error_code ec;
-    auto rank = svGlob(basePath, pattern, GlobMode::Files, files, expandEnvVars, ec);
+    auto rank = svGlob(basePath, pattern, GlobMode::Files, files, expandEnvVars, ec,
+                       environmentOverrides);
 
     if (ec && !dirPrefixes.empty()) {
         // The file was not found at the given path; try prepending each
@@ -521,7 +522,7 @@ void SourceLoader::addFilesInternal(std::string_view pattern, const fs::path& ba
             SmallVector<fs::path> prefixed;
             std::error_code prefixEc;
             auto prefixRank = svGlob(basePath, prefix + patternStr, GlobMode::Files, prefixed,
-                                     expandEnvVars, prefixEc);
+                                     expandEnvVars, prefixEc, environmentOverrides);
             if (!prefixEc) {
                 files = std::move(prefixed);
                 rank = prefixRank;
@@ -595,7 +596,7 @@ void SourceLoader::createLibrary(const LibraryDeclarationSyntax& syntax, const f
                 SmallVector<fs::path> dirs;
                 std::error_code ec;
                 svGlob(basePath, spec, GlobMode::Directories, dirs,
-                       /* expandEnvVars */ true, ec);
+                       /* expandEnvVars */ true, ec, environmentOverrides);
 
                 if (ec) {
                     addError(spec, ec);
