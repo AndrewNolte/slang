@@ -109,6 +109,109 @@ TEST_CASE("Driver command files are processed strictly in order") {
     CHECK(std::ranges::is_sorted(fileNames));
 }
 
+TEST_CASE("Driver rejects empty environment variables in nested command files") {
+    putenv((char*)"SLANG_DRIVER_EMPTY_TEST=");
+    for (const auto* option : {"-f", "-F", "-C"}) {
+        CAPTURE(option);
+        auto guard = OS::captureOutput();
+        TempFile inner("-D BEFORE=1\n${SLANG_DRIVER_EMPTY_TEST}/source.sv\n"
+                       "\"$SLANG_DRIVER_EMPTY_TEST/other.sv\"\n"
+                       "$(SLANG_DRIVER_EMPTY_TEST)/last.sv\n-D AFTER=1\n");
+        TempFile outer(fmt::format("{} \"{}\"\n", option, inner.path.generic_string()));
+        const auto outerPath = outer.path.string();
+        const char* argv[] = {"testfoo", "-f", outerPath.c_str()};
+        Driver driver;
+        driver.addStandardArgs();
+
+        CHECK_FALSE(driver.parseCommandLine(3, argv));
+        CHECK(driver.options.defines.empty());
+        CHECK(driver.diagEngine.getNumErrors() == 1);
+        const std::string message =
+            "environment variable ${SLANG_DRIVER_EMPTY_TEST} is unset or empty";
+        INFO(OS::capturedStderr);
+        CHECK(contains(OS::capturedStderr, ":2:1: error: " + message));
+        const auto first = OS::capturedStderr.find(message);
+        REQUIRE(first != std::string::npos);
+        CHECK(OS::capturedStderr.find(message, first + message.size()) == std::string::npos);
+    }
+}
+
+TEST_CASE("Driver reports missing environment variables once across command files") {
+    putenv((char*)"SLANG_DRIVER_EMPTY_TEST=");
+    putenv((char*)"SLANG_DRIVER_OTHER_EMPTY_TEST=");
+    for (bool separateUnit : {false, true}) {
+        CAPTURE(separateUnit);
+        auto guard = OS::captureOutput();
+        TempFile first("${SLANG_DRIVER_EMPTY_TEST}/source.sv\n");
+        TempFile second("-D BEFORE=1\n$(SLANG_DRIVER_EMPTY_TEST)/other.sv\n");
+        TempFile third("$SLANG_DRIVER_OTHER_EMPTY_TEST/third.sv\n");
+        Driver driver;
+        driver.addStandardArgs();
+
+        CHECK_FALSE(driver.processCommandFiles(first.path.string(), false, false));
+        CHECK_FALSE(driver.processCommandFiles(second.path.string(), false, separateUnit));
+        CHECK_FALSE(driver.processCommandFiles(third.path.string(), false, separateUnit));
+        CHECK(driver.options.defines.empty());
+        CHECK(driver.sourceLoader.loadSources().empty());
+        CHECK(driver.diagEngine.getNumErrors() == 2);
+        INFO(OS::capturedStderr);
+        CHECK(contains(OS::capturedStderr,
+                       "environment variable ${SLANG_DRIVER_EMPTY_TEST} is unset or empty"));
+        CHECK_FALSE(
+            contains(OS::capturedStderr, "environment variable $(SLANG_DRIVER_EMPTY_TEST)"));
+        CHECK(contains(OS::capturedStderr,
+                       "environment variable $SLANG_DRIVER_OTHER_EMPTY_TEST is unset or empty"));
+    }
+}
+
+TEST_CASE("Driver environment overrides propagate through nested command files") {
+    for (const auto* option : {"-f", "-F", "-C"}) {
+        CAPTURE(option);
+        auto guard = OS::captureOutput();
+        TempFile source("module source; endmodule\n");
+        TempFile inner("\"${SLANG_DRIVER_SOURCE}\"\n");
+        TempFile outer(fmt::format("{} \"$(SLANG_DRIVER_LIST)\"\n", option));
+        Driver driver;
+        driver.addStandardArgs();
+        driver.setEnvironmentOverrides({{"SLANG_DRIVER_SOURCE", source.path.generic_string()},
+                                        {"SLANG_DRIVER_LIST", inner.path.generic_string()},
+                                        {"SLANG_DRIVER_OUTER", outer.path.generic_string()}});
+        CommandLine::ParseOptions options;
+        options.expandEnvVars = true;
+        REQUIRE(driver.parseCommandLine("test -f \"$SLANG_DRIVER_OUTER\"", options));
+        REQUIRE(driver.processOptions());
+        auto buffers = driver.sourceLoader.loadSources();
+        REQUIRE(buffers.size() == 1);
+        CHECK(driver.sourceManager.getFullPath(buffers[0].id) == source.path);
+    }
+}
+
+TEST_CASE("Driver environment overrides apply to library maps and their include directories") {
+    auto guard = OS::captureOutput();
+    TempFile source("module source; endmodule\n");
+    TempFile inner("library testlib \"${SLANG_DRIVER_SOURCE}\" "
+                   "-incdir \"$(SLANG_DRIVER_INCLUDE)\";\n");
+    TempFile outer("include \"$SLANG_DRIVER_MAP\";\n");
+    Driver driver;
+    driver.addStandardArgs();
+    driver.setEnvironmentOverrides(
+        {{"SLANG_DRIVER_SOURCE", source.path.generic_string()},
+         {"SLANG_DRIVER_MAP", inner.path.generic_string()},
+         {"SLANG_DRIVER_INCLUDE", source.path.parent_path().generic_string()}});
+    REQUIRE(
+        driver.parseCommandLine(fmt::format("test --libmap \"{}\"", outer.path.generic_string())));
+    REQUIRE(driver.processOptions(false));
+    auto buffers = driver.sourceLoader.loadSources();
+    REQUIRE(buffers.size() == 1);
+    CHECK(driver.sourceManager.getFullPath(buffers[0].id) == source.path);
+    REQUIRE(driver.sourceLoader.getLibraryMaps().size() == 2);
+    auto library = driver.sourceManager.getLibraryFor(buffers[0].id);
+    REQUIRE(library);
+    CHECK(library->name == "testlib");
+    REQUIRE(library->includeDirs.size() == 1);
+    CHECK(library->includeDirs[0] == source.path.parent_path());
+}
+
 TEST_CASE("Driver tracks command file metadata") {
     auto guard = OS::captureOutput();
 

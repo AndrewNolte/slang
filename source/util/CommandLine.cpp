@@ -177,9 +177,13 @@ bool CommandLine::parse(int argc, const char* const argv[], const ParseOptions& 
 }
 
 bool CommandLine::parse(std::string_view argList, const ParseOptions& options) {
+    const auto errorCount = errors.size();
     TokenBuilder builder(options.sourceBuffer);
     tokenize(argList, options, builder);
     builder.finish();
+
+    if (errors.size() != errorCount)
+        return false;
 
     return parseImpl(builder.getTokens(), options);
 }
@@ -228,6 +232,22 @@ void CommandLine::tokenize(std::string_view argList, const ParseOptions& options
                            TokenBuilder& builder) {
     auto ptr = argList.data();
     auto end = ptr + argList.size();
+    auto expandEnvVar = [&] {
+        const auto start = ptr - 1;
+        auto value = OS::parseEnvVar(ptr, end, environmentOverrides);
+        if (value.empty()) {
+            SourceLocation loc;
+            if (options.sourceBuffer)
+                loc = {options.sourceBuffer.id, uint64_t(start - options.sourceBuffer.data.data())};
+            const std::string_view reference(start, size_t(ptr - start));
+            auto name = reference.substr(1);
+            if (name.front() == '(' || name.front() == '{')
+                name = name.substr(1, name.size() - 2);
+            errors.push_back({fmt::format("environment variable {} is unset or empty", reference),
+                              loc, std::string(name)});
+        }
+        return value;
+    };
     while (ptr != end) {
         // Whitespace breaks up arguments.
         char c = *ptr++;
@@ -272,7 +292,7 @@ void CommandLine::tokenize(std::string_view argList, const ParseOptions& options
 
         // Look for environment variables to expand.
         if (c == '$' && options.expandEnvVars && ptr != end) {
-            std::string result = OS::parseEnvVar(ptr, end);
+            std::string result = expandEnvVar();
 
             // All tokens expanded from the env variable get
             // the location of the '$'.
@@ -322,7 +342,7 @@ void CommandLine::tokenize(std::string_view argList, const ParseOptions& options
                     c = *ptr++;
 
                 if (c == '$' && options.expandEnvVars && ptr != end)
-                    builder.append(ptr - 1, OS::parseEnvVar(ptr, end));
+                    builder.append(ptr - 1, expandEnvVar());
                 else
                     builder.append(ptr - 1);
             }

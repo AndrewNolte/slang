@@ -8,6 +8,7 @@
 #pragma once
 
 #include <filesystem>
+#include <map>
 
 #include "slang/util/SmallVector.h"
 #include "slang/util/Util.h"
@@ -59,11 +60,13 @@ enum class GlobMode {
 /// @param ec An error code that will be cleared on success and set to a value on failure.
 ///           Failure to match is only indicated when the pattern is an exact path with no
 ///           wildcards.
+/// @param environmentOverrides Literal values to use instead of the process environment.
 /// @returns A rank that indicates the strength of the match result.
 ///
 SLANG_EXPORT GlobRank svGlob(const std::filesystem::path& basePath, std::string_view pattern,
                              GlobMode mode, SmallVector<std::filesystem::path>& results,
-                             bool expandEnvVars, std::error_code& ec);
+                             bool expandEnvVars, std::error_code& ec,
+                             const std::map<std::string, std::string>& environmentOverrides = {});
 
 /// Checks whether the given path matches the supplied pattern.
 SLANG_EXPORT bool svGlobMatches(const std::filesystem::path& path,

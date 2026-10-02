@@ -9,6 +9,7 @@
 
 #include <deque>
 #include <filesystem>
+#include <map>
 #include <memory>
 #include <optional>
 #include <span>
@@ -61,6 +62,9 @@ struct SLANG_EXPORT SourceOptions {
 class SLANG_EXPORT SourceLoader {
 public:
     using SyntaxTreeList = std::vector<std::shared_ptr<syntax::SyntaxTree>>;
+
+    /// Literal overrides for environment references in library maps; other names are inherited.
+    std::map<std::string, std::string> environmentOverrides;
 
     /// Constructs a new instance of the SourceLoader class.
     explicit SourceLoader(SourceManager& sourceManager);

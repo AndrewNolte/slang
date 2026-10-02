@@ -197,7 +197,8 @@ GlobRank svGlobInternal(const fs::path& basePath, std::string_view pattern, Glob
 
 SLANG_EXPORT GlobRank svGlob(const fs::path& basePath, std::string_view pattern, GlobMode mode,
                              SmallVector<fs::path>& results, bool expandEnvVars,
-                             std::error_code& ec) {
+                             std::error_code& ec,
+                             const std::map<std::string, std::string>& environmentOverrides) {
     ec.clear();
     if (pattern == "-"sv && mode == GlobMode::Files) {
         // This is interpretted as trying to read stdin.
@@ -215,7 +216,7 @@ SLANG_EXPORT GlobRank svGlob(const fs::path& basePath, std::string_view pattern,
         while (ptr != end) {
             char c = *ptr++;
             if (c == '$' && ptr != end)
-                patternStr.append(OS::parseEnvVar(ptr, end));
+                patternStr.append(OS::parseEnvVar(ptr, end, environmentOverrides));
             else
                 patternStr.push_back(c);
         }

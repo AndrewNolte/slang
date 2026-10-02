@@ -384,6 +384,13 @@ public:
     /// can still add their own custom arguments if desired.
     void addStandardArgs();
 
+    /// Sets literal environment overrides for arguments, command files, and library maps.
+    /// Unspecified names use the process environment, which is left unchanged.
+    void setEnvironmentOverrides(const std::map<std::string, std::string>& overrides) {
+        cmdLine.environmentOverrides = overrides;
+        sourceLoader.environmentOverrides = overrides;
+    }
+
     /// @brief Parses command line arguments from the given C-style argument list.
     ///
     /// This is templated to support both char and wchar_t arg lists.
@@ -537,6 +544,12 @@ private:
     bool reportLoadErrors();
 
     bool anyFailedLoads = false;
+
+    /// Number of shared command-line errors already issued by recursive file processing.
+    size_t issuedCommandLineErrors = 0;
+
+    /// Missing environment variables already reported while loading this driver's arguments.
+    flat_hash_set<std::string> issuedEnvironmentVariables;
 
     std::filesystem::path currentCommandFile;
     flat_hash_set<std::filesystem::path> activeCommandFiles;

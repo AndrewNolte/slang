@@ -361,7 +361,10 @@ void OS::printException(std::string_view format, std::string_view what) {
     printE(fmt::vformat(format, fmt::make_format_args(what)));
 }
 
-std::string OS::getEnv(const std::string& name) {
+std::string OS::getEnv(const std::string& name,
+                       const std::map<std::string, std::string>& overrides) {
+    if (auto it = overrides.find(name); it != overrides.end())
+        return it->second;
     char* result = getenv(name.c_str());
     if (result)
         return result;
@@ -369,7 +372,8 @@ std::string OS::getEnv(const std::string& name) {
         return {};
 }
 
-std::string OS::parseEnvVar(const char*& ptr, const char* end) {
+std::string OS::parseEnvVar(const char*& ptr, const char* end,
+                            const std::map<std::string, std::string>& overrides) {
     // Three forms for environment variables to try:
     // $VAR
     // $(VAR)
@@ -382,7 +386,7 @@ std::string OS::parseEnvVar(const char*& ptr, const char* end) {
         while (ptr != end) {
             c = *ptr++;
             if (c == endDelim)
-                return OS::getEnv(varName);
+                return OS::getEnv(varName, overrides);
 
             varName += c;
         }
@@ -397,7 +401,7 @@ std::string OS::parseEnvVar(const char*& ptr, const char* end) {
         while (ptr != end && isValidCIdChar(*ptr))
             varName += *ptr++;
 
-        return OS::getEnv(varName);
+        return OS::getEnv(varName, overrides);
     }
     else {
         // This is not a possible variable name so just return what we have.

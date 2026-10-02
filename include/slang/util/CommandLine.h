@@ -77,6 +77,10 @@ SLANG_BITMASK(CommandLineFlags, CommaList)
 ///
 class SLANG_EXPORT CommandLine {
 public:
+    /// Literal overrides used when expanding environment variables, including empty values.
+    /// Names absent from this map fall back to the process environment.
+    std::map<std::string, std::string> environmentOverrides;
+
     /// Register a flag with @a name that will be parsed as a boolean value,
     /// setting to `true` if no value is provided, and otherwise accepting
     /// the strings "true", "True", "false", and "False" for longform values.
@@ -344,6 +348,9 @@ public:
         /// if the command line string was provided via a SourceBuffer.
         /// Otherwise this will be an empty / invalid value.
         SourceLocation location;
+
+        /// The unadorned variable name for a failed environment expansion, if any.
+        std::optional<std::string> environmentVariable = std::nullopt;
     };
 
     /// Contains various options to control parsing of command flags.
@@ -359,6 +366,7 @@ public:
 
         /// If set to true, expand any environment variables found,
         /// with the supported forms $VAR, $(VAR), and ${VAR}.
+        /// Unset or empty variables cause parsing to fail.
         bool expandEnvVars = false;
 
         /// If set to true, don't issue an error if a duplicate

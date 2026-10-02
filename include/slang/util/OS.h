@@ -9,6 +9,7 @@
 
 #include <filesystem>
 #include <functional>
+#include <map>
 
 #include "slang/util/ScopeGuard.h"
 #include "slang/util/SmallVector.h"
@@ -63,8 +64,14 @@ public:
     /// with @a what.
     static void printException(std::string_view format, std::string_view what);
 
-    static std::string getEnv(const std::string& name);
-    static std::string parseEnvVar(const char*& ptr, const char* end);
+    /// Looks up an environment variable, preferring literal overrides to the process environment.
+    static std::string getEnv(const std::string& name,
+                              const std::map<std::string, std::string>& overrides = {});
+
+    /// Expands a $VAR, ${VAR}, or $(VAR) reference, with @a ptr positioned after the dollar sign.
+    /// Advances @a ptr past the reference and leaves malformed references unchanged.
+    static std::string parseEnvVar(const char*& ptr, const char* end,
+                                   const std::map<std::string, std::string>& overrides = {});
 
     static auto captureOutput(
         std::function<void(std::string_view, bool)> callback = captureOutputStreams) {
