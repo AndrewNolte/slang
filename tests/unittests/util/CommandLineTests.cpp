@@ -342,12 +342,64 @@ TEST_CASE("Test CommandLine -- env vars") {
 
     auto args = R"qq(
 $&
-asdf/$FOO_456/bar "$(BAR#)" ${UNK} ${BAZ} ${
+asdf/$FOO_456/bar "$(BAR#)" ${BAZ} ${
 $)qq"sv;
     CHECK(cmdLine.parse(args, options));
 
     CHECK(stuff ==
           std::vector{"$&"s, "asdf/abc"s, "123/bar"s, "some string"s, "987654"s, "${"s, "$"s});
+}
+
+TEST_CASE("Test CommandLine -- unset and empty environment variables are errors") {
+    putenv((char*)"SLANG_CMDLINE_EMPTY_TEST=");
+#ifdef _WIN32
+    _putenv_s("SLANG_CMDLINE_UNSET_TEST", "");
+#else
+    unsetenv("SLANG_CMDLINE_UNSET_TEST");
+#endif
+    for (const auto* reference : {"$SLANG_CMDLINE_EMPTY_TEST", "${SLANG_CMDLINE_EMPTY_TEST}",
+                                  "$(SLANG_CMDLINE_EMPTY_TEST)", "$SLANG_CMDLINE_UNSET_TEST",
+                                  "${SLANG_CMDLINE_UNSET_TEST}", "$(SLANG_CMDLINE_UNSET_TEST)"}) {
+        for (bool quoted : {false, true}) {
+            CAPTURE(reference, quoted);
+            CommandLine cmdLine;
+            std::vector<std::string> arguments;
+            cmdLine.add("-a", arguments, "arguments");
+            cmdLine.setPositional(arguments, "arguments");
+            SourceManager sm;
+            const auto text = fmt::format("before {}{}{} after", quoted ? "\"" : "", reference,
+                                          quoted ? "\"" : "");
+            auto buffer = sm.assignText(text);
+            CommandLine::ParseOptions options;
+            options.ignoreProgramName = true;
+            options.expandEnvVars = true;
+            options.sourceBuffer = buffer;
+            CHECK_FALSE(cmdLine.parse(buffer.data, options));
+            REQUIRE(cmdLine.getErrors().size() == 1);
+            CHECK(cmdLine.getErrors()[0].message ==
+                  fmt::format("environment variable {} is unset or empty", reference));
+            CHECK(cmdLine.getErrors()[0].location == SourceLocation(buffer.id, text.find('$')));
+            CHECK(arguments.empty());
+        }
+    }
+}
+
+TEST_CASE("Test CommandLine -- environment validation ignores literal references") {
+    CommandLine cmdLine;
+    std::vector<std::string> arguments;
+    cmdLine.add("-a", arguments, "arguments");
+    cmdLine.setPositional(arguments, "arguments");
+    CommandLine::ParseOptions options;
+    options.ignoreProgramName = true;
+    options.expandEnvVars = true;
+    options.supportComments = true;
+    CHECK(cmdLine.parse(R"(# ${}
+// ${}
+/* ${} */ '${}' \${}
+)",
+                        options));
+    CHECK(arguments == std::vector{"${}"s, "${}"s});
+    CHECK(cmdLine.getErrors().empty());
 }
 
 #if __cpp_exceptions

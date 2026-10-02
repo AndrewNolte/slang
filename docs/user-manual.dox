@@ -227,7 +227,9 @@ like any other form of whitespace. Some important features are as follows:
    and other shells.
 -  The backslash character can be used to escape special characters and treat them like normal text.
 -  Environment variables in the command file are expanded. Variables can be specified in one of
-   three styles: $VAR, \$\(VAR), and ${VAR}.
+   three styles: $VAR, \$\(VAR), and ${VAR}. Unset or empty variables are errors; arguments from
+   a file containing an invalid expansion are not applied. Each missing variable is reported
+   once, at its first occurrence, even if it appears in multiple command files.
 -  Command files can further include other command files by using -f or -F.
 -  Arguments set in a command file are overridden by anything set on the command line if they would
    otherwise conflict.

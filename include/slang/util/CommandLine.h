@@ -344,6 +344,9 @@ public:
         /// if the command line string was provided via a SourceBuffer.
         /// Otherwise this will be an empty / invalid value.
         SourceLocation location;
+
+        /// The unadorned variable name for a failed environment expansion, if any.
+        std::optional<std::string> environmentVariable = std::nullopt;
     };
 
     /// Contains various options to control parsing of command flags.
@@ -359,6 +362,7 @@ public:
 
         /// If set to true, expand any environment variables found,
         /// with the supported forms $VAR, $(VAR), and ${VAR}.
+        /// Unset or empty variables cause parsing to fail.
         bool expandEnvVars = false;
 
         /// If set to true, don't issue an error if a duplicate

@@ -538,6 +538,12 @@ private:
 
     bool anyFailedLoads = false;
 
+    /// Number of shared command-line errors already issued by recursive file processing.
+    size_t issuedCommandLineErrors = 0;
+
+    /// Missing environment variables already reported while loading this driver's arguments.
+    flat_hash_set<std::string> issuedEnvironmentVariables;
+
     std::filesystem::path currentCommandFile;
     flat_hash_set<std::filesystem::path> activeCommandFiles;
     flat_hash_map<std::filesystem::path, CommandFileMetadata> commandFileMetadata;
