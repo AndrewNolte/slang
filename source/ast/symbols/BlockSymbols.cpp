@@ -745,6 +745,47 @@ GenerateBlockArraySymbol& GenerateBlockArraySymbol::fromSyntax(Compilation& comp
     result->setAttributes(*context.scope, syntax.attributes);
 
     auto genvar = syntax.identifier;
+    auto genvarSyntax = comp.emplace<IdentifierNameSyntax>(genvar);
+
+    SmallVector<const GenerateBlockSymbol*> entries;
+    auto createBlock = [&, blockLoc = loc](ConstantValue value, bool isUninstantiated) {
+        // Spec: each generate block gets their own scope, with an implicit
+        // localparam of the same name as the genvar.
+        auto block = comp.emplace<GenerateBlockSymbol>(comp, "", blockLoc, (uint32_t)entries.size(),
+                                                       isUninstantiated);
+        auto implicitParam = comp.emplace<ParameterSymbol>(genvar.valueText(), genvar.location(),
+                                                           true /* isLocal */, false /* isPort */);
+        implicitParam->setSyntax(*genvarSyntax);
+        comp.noteReference(*implicitParam);
+
+        block->addMember(*implicitParam);
+        block->setSyntax(*syntax.block);
+        block->branchKind = GenerateBranchKind::LoopIteration;
+
+        addBlockMembers(*block, *syntax.block);
+
+        implicitParam->setType(comp.getIntegerType());
+        implicitParam->setValue(comp, std::move(value), /* needsCoercion */ false);
+        implicitParam->setIsFromGenvar(true);
+
+        block->arrayIndex = &implicitParam->getValue().integer();
+        entries.push_back(block);
+    };
+
+    auto guard = ScopeGuard([&] {
+        result->entries = entries.copy(comp);
+        if (entries.empty()) {
+            // Retain the body for visitors even when loop evaluation fails. This block is
+            // uninstantiated and excluded from entries, so indexed hierarchy lookup cannot find it.
+            createBlock(SVInt(32, 0, true), true);
+            result->addMember(*entries[0]);
+        }
+        else {
+            for (auto entry : entries)
+                result->addMember(*entry);
+        }
+    });
+
     if (genvar.isMissing())
         return *result;
 
@@ -754,8 +795,6 @@ GenerateBlockArraySymbol& GenerateBlockArraySymbol::fromSyntax(Compilation& comp
                          : syntax.keyword.range();
         context.addDiag(diag::UnnamedGenerate, range);
     }
-
-    auto genvarSyntax = comp.emplace<IdentifierNameSyntax>(genvar);
 
     // Walk up the tree a bit to see if we're nested inside another generate loop.
     // If we are, we'll include that parent's array size in our decision about
@@ -789,31 +828,6 @@ GenerateBlockArraySymbol& GenerateBlockArraySymbol::fromSyntax(Compilation& comp
         result->addMember(*genvarSymbol);
         genvarSym = genvarSymbol;
     }
-
-    SmallVector<const GenerateBlockSymbol*> entries;
-    auto createBlock = [&, blockLoc = loc](ConstantValue value, bool isUninstantiated) {
-        // Spec: each generate block gets their own scope, with an implicit
-        // localparam of the same name as the genvar.
-        auto block = comp.emplace<GenerateBlockSymbol>(comp, "", blockLoc, (uint32_t)entries.size(),
-                                                       isUninstantiated);
-        auto implicitParam = comp.emplace<ParameterSymbol>(genvar.valueText(), genvar.location(),
-                                                           true /* isLocal */, false /* isPort */);
-        implicitParam->setSyntax(*genvarSyntax);
-        comp.noteReference(*implicitParam);
-
-        block->addMember(*implicitParam);
-        block->setSyntax(*syntax.block);
-        block->branchKind = GenerateBranchKind::LoopIteration;
-
-        addBlockMembers(*block, *syntax.block);
-
-        implicitParam->setType(comp.getIntegerType());
-        implicitParam->setValue(comp, std::move(value), /* needsCoercion */ false);
-        implicitParam->setIsFromGenvar(true);
-
-        block->arrayIndex = &implicitParam->getValue().integer();
-        entries.push_back(block);
-    };
 
     // Bind the initialization expression.
     auto& initial = Expression::bindRValue(comp.getIntegerType(), *syntax.initialExpr,
@@ -909,20 +923,6 @@ GenerateBlockArraySymbol& GenerateBlockArraySymbol::fromSyntax(Compilation& comp
         bool isUninstantiated = context.scope->isUninstantiated();
         for (auto& index : indices)
             createBlock(index, isUninstantiated);
-    }
-
-    result->entries = entries.copy(comp);
-    if (entries.empty()) {
-        // Create block and add it so visitors can access the uninstantiated block; by
-        // default diags from uninstantiated blocks are suppressed, so this is safe. This is used
-        // for things like unused checking and with CompilationFlags::CheckUninstantiated.
-        // It is still inacessible from gen_arr[0] due to how lookups work.
-        createBlock(SVInt(32, 0, true), true);
-        result->addMember(*entries[0]);
-    }
-    else {
-        for (auto entry : entries)
-            result->addMember(*entry);
     }
 
     return *result;
