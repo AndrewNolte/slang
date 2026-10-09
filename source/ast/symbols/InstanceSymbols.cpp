@@ -145,6 +145,15 @@ private:
             auto result = &InstanceArraySymbol::createEmpty(comp, nameToken.valueText(),
                                                             nameToken.location());
             result->setSyntax(syntax);
+            if (comp.hasFlag(CompilationFlags::CheckUninstantiated)) {
+                // Retain the element scope without making it an addressable array element.
+                auto savedFlags = flags;
+                flags |= InstanceFlags::Uninstantiated;
+                auto element = recurse(syntax, nullptr, it, end);
+                flags = savedFlags;
+                element->name = "";
+                result->addMember(*element);
+            }
             return result;
         }
 
@@ -990,6 +999,23 @@ struct IfaceParamAssignment {
 using IfaceParamAssignmentMap =
     flat_hash_map<const InterfacePortSymbol*, std::vector<IfaceParamAssignment>>;
 
+static SmallVector<std::optional<ConstantRange>, 4> getDefaultIfaceDimensions(
+    const InterfacePortSymbol& port, const ASTContext& context) {
+    SmallVector<std::optional<ConstantRange>, 4> result;
+    if (auto dims = port.getDeclaredRange()) {
+        for (auto dim : *dims)
+            result.push_back(dim);
+    }
+    else {
+        for (auto dimSyntax : port.getSyntax()->as<DeclaratorSyntax>().dimensions) {
+            auto dim = context.evalDimension(*dimSyntax, /* requireRange */ true,
+                                             /* isPacked */ false);
+            result.push_back(dim.isRange() ? std::optional(dim.range) : std::nullopt);
+        }
+    }
+    return result;
+}
+
 // Scan direct-body `$static_assert`s once and collect the parameter assignments they imply for
 // each interface port. Asserts nested in generate blocks are skipped because their constraints are
 // conditional, but parameter assignments must be applied before elaborating generate branches.
@@ -1051,21 +1077,22 @@ static IfaceParamAssignmentMap collectIfaceParamAssignments(const InstanceBodySy
             continue;
         }
 
-        auto dims = match->port->getDeclaredRange();
-        if (!dims || dims->size() != match->elementSelectors.size())
+        auto dims = getDefaultIfaceDimensions(*match->port, context);
+        if (dims.size() != match->elementSelectors.size())
             continue;
 
-        // An interface instance array has one shared parameterization. The selectors identify a
-        // valid element whose parameter can appear in the assertion; the inferred assignment is
-        // applied to every element below.
+        // All elements share the inferred parameterization. Selectors must match the declared
+        // rank and known bounds, even when another dimension is unavailable.
         bool validPath = true;
-        for (size_t i = 0; i < dims->size(); i++) {
+        for (size_t i = 0; i < dims.size(); i++) {
             auto& selectorExpr = Expression::bind(*match->elementSelectors[i], context);
             auto selectorValue = context.tryEval(selectorExpr);
             auto index = selectorValue.isInteger() ? selectorValue.integer().as<int32_t>()
                                                    : std::optional<int32_t>{};
             if (selectorExpr.hasHierarchicalReference() || !index ||
-                !(*dims)[i].containsPoint(*index)) {
+                (dims[i] && !dims[i]->containsPoint(*index)) ||
+                (!dims[i] &&
+                 !body.getCompilation().hasFlag(CompilationFlags::CheckUninstantiated))) {
                 validPath = false;
                 break;
             }
@@ -1097,11 +1124,11 @@ static IfaceParamAssignmentMap collectIfaceParamAssignments(const InstanceBodySy
 static Symbol* recurseDefaultIfaceInst(Compilation& comp, const InterfacePortSymbol& port,
                                        const InstanceSymbol*& firstInst,
                                        ParameterBuilder& paramBuilder,
-                                       std::span<const ConstantRange>::iterator it,
-                                       std::span<const ConstantRange>::iterator end) {
-    if (it == end) {
+                                       std::span<const std::optional<ConstantRange>> dims,
+                                       bitmask<InstanceFlags> flags = InstanceFlags::None) {
+    if (dims.empty()) {
         auto& body = InstanceBodySymbol::fromDefinition(comp, *port.interfaceDef, port.location,
-                                                        paramBuilder, InstanceFlags::None);
+                                                        paramBuilder, flags);
 
         auto& result = *comp.emplace<InstanceSymbol>(port.name, port.location, body, 0u);
 
@@ -1110,13 +1137,26 @@ static Symbol* recurseDefaultIfaceInst(Compilation& comp, const InterfacePortSym
         return &result;
     }
 
-    ConstantRange range = *it++;
+    if (!dims.front()) {
+        auto& result = InstanceArraySymbol::createEmpty(comp, port.name, port.location);
+        if (comp.hasFlag(CompilationFlags::CheckUninstantiated)) {
+            auto element = recurseDefaultIfaceInst(comp, port, firstInst, paramBuilder,
+                                                   dims.subspan(1),
+                                                   flags | InstanceFlags::Uninstantiated);
+            element->name = "";
+            result.addMember(*element);
+        }
+        return &result;
+    }
+
+    ConstantRange range = *dims.front();
     if (range.width() > comp.getOptions().maxInstanceArray)
         return &InstanceArraySymbol::createEmpty(comp, port.name, port.location);
 
     SmallVector<const Symbol*> elements;
     for (uint32_t i = 0; i < range.width(); i++) {
-        auto symbol = recurseDefaultIfaceInst(comp, port, firstInst, paramBuilder, it, end);
+        auto symbol = recurseDefaultIfaceInst(comp, port, firstInst, paramBuilder, dims.subspan(1),
+                                              flags);
         symbol->name = "";
         elements.push_back(symbol);
     }
@@ -1172,21 +1212,14 @@ void InstanceSymbol::connectDefaultIfacePorts() const {
                 }
                 paramBuilder.setOverrides(overrideNode);
 
-                Symbol* inst;
+                auto dims = getDefaultIfaceDimensions(ifacePort, context);
+                const InstanceSymbol* firstInst = nullptr;
+                auto inst = recurseDefaultIfaceInst(comp, ifacePort, firstInst, paramBuilder, dims);
                 const ModportSymbol* modport = nullptr;
-                if (auto dims = ifacePort.getDeclaredRange()) {
-                    const InstanceSymbol* firstInst = nullptr;
-                    inst = recurseDefaultIfaceInst(comp, ifacePort, firstInst, paramBuilder,
-                                                   dims->begin(), dims->end());
-
-                    if (firstInst) {
-                        auto portRange = SourceRange{port->location,
-                                                     port->location + port->name.length()};
-                        modport = ifacePort.getModport(context, *firstInst, portRange);
-                    }
-                }
-                else {
-                    inst = &InstanceArraySymbol::createEmpty(comp, port->name, port->location);
+                if (firstInst) {
+                    auto portRange = SourceRange{port->location,
+                                                 port->location + port->name.length()};
+                    modport = ifacePort.getModport(context, *firstInst, portRange);
                 }
 
                 inst->setParent(*parent);

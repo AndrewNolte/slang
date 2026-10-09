@@ -16,6 +16,77 @@
 #include "slang/ast/symbols/VariableSymbols.h"
 #include "slang/ast/types/Type.h"
 
+TEST_CASE("Unknown instance array bounds retain uninstantiated element scopes") {
+    bool checkUninstantiated = false;
+    SECTION("Skip uninstantiated scopes") {
+    }
+    SECTION("Retain uninstantiated scopes") {
+        checkUninstantiated = true;
+    }
+    auto tree = SyntaxTree::fromText(R"(
+typedef struct packed { bit enabled; int tag; } packet_t;
+interface channel #(type T = bit, int WIDTH = 1);
+    T data;
+    logic [WIDTH-1:0] payload;
+endinterface
+module sample #(parameter int COUNT)(channel requests[COUNT], channel matrix[COUNT][2]);
+    $static_assert(type(requests[0].T) == type(packet_t));
+    $static_assert(requests[0].WIDTH == 13);
+    $static_assert(type(matrix[0][2].T) == type(packet_t));
+    channel #(packet_t, 13) local_channels[COUNT][2]();
+endmodule
+)");
+    CompilationOptions options;
+    options.flags |= CompilationFlags::AllowInvalidTop | CompilationFlags::AllowTopLevelIfacePorts;
+    if (checkUninstantiated)
+        options.flags |= CompilationFlags::CheckUninstantiated;
+    Compilation compilation(options);
+    compilation.addSyntaxTree(tree);
+    auto& diagnostics = compilation.getAllDiagnostics();
+    REQUIRE(diagnostics.size() == 2);
+    CHECK(diagnostics[0].code == diag::StaticAssert);
+    CHECK(diagnostics[1].code == diag::StaticAssert);
+
+    auto& body = compilation.getRoot().lookupName<InstanceSymbol>("sample").body;
+    auto& local = body.find<InstanceArraySymbol>("local_channels");
+    auto [connection, modport] = body.find<InterfacePortSymbol>("requests").getConnection();
+    REQUIRE(connection);
+    auto& portArray = connection->as<InstanceArraySymbol>();
+    CHECK(local.elements.empty());
+    CHECK(portArray.elements.empty());
+    CHECK(body.lookupName("local_channels[0][0].data") == nullptr);
+    CHECK(body.lookupName("requests[0].data") == nullptr);
+
+    if (!checkUninstantiated) {
+        CHECK(local.members().begin() == local.members().end());
+        CHECK(portArray.members().begin() == portArray.members().end());
+        return;
+    }
+
+    auto localScopes = local.membersOfType<InstanceArraySymbol>();
+    REQUIRE(localScopes.begin() != localScopes.end());
+    auto& inner = *localScopes.begin();
+    REQUIRE(inner.elements.size() == 2);
+    auto& element = inner.elements[0]->as<InstanceSymbol>();
+    CHECK(element.body.flags.has(InstanceFlags::Uninstantiated));
+    CHECK(element.body.find<VariableSymbol>("data").getType().getBitWidth() == 33);
+    CHECK(element.body.find<VariableSymbol>("payload").getType().getBitWidth() == 13);
+
+    auto portScopes = portArray.membersOfType<InstanceSymbol>();
+    REQUIRE(portScopes.begin() != portScopes.end());
+    auto& portBody = portScopes.begin()->body;
+    CHECK(portBody.flags.has(InstanceFlags::Uninstantiated));
+    CHECK(portBody.find<VariableSymbol>("data").getType().getBitWidth() == 33);
+    CHECK(portBody.find<VariableSymbol>("payload").getType().getBitWidth() == 13);
+
+    auto [matrix, unused] = body.find<InterfacePortSymbol>("matrix").getConnection();
+    REQUIRE(matrix);
+    auto matrixScopes = matrix->as<InstanceArraySymbol>().membersOfType<InstanceArraySymbol>();
+    REQUIRE(matrixScopes.begin() != matrixScopes.end());
+    auto& matrixElement = matrixScopes.begin()->elements[0]->as<InstanceSymbol>();
+    CHECK(matrixElement.body.find<VariableSymbol>("data").getType().getBitWidth() == 1);
+}
+
 TEST_CASE("Module ANSI ports") {
     auto tree = SyntaxTree::fromText(R"(
 module mh0 (wire x); endmodule
