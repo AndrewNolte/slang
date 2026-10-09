@@ -611,14 +611,32 @@ private:
 /// the type of some expression or declaration.
 class SLANG_EXPORT ErrorType final : public Type {
 public:
+    /// The structure of one invalid array dimension, without fabricated bounds.
+    struct ArrayDimension {
+        /// The element type, which can itself contain errors or further dimensions.
+        const Type& elementType;
+        /// Evaluated bounds, when dimension evaluation succeeded.
+        std::optional<ConstantRange> range;
+        /// Whether this is a packed dimension.
+        bool isPacked;
+    };
+
     /// A wrapped child type that is considered invalid.
     const Type* child;
+
+    /// Array structure retained when an element type or dimension is invalid.
+    std::optional<ArrayDimension> arrayDimension;
 
     explicit ErrorType(const Type* child = nullptr) :
         Type(SymbolKind::ErrorType, "", SourceLocation()), child(child) {}
 
     ConstantValue getDefaultValueImpl() const { return nullptr; }
     void serializeTo(ASTSerializer& serializer) const;
+
+    /// Preserve an invalid array dimension while keeping the resulting type erroneous.
+    static const ErrorType& fromArray(BumpAllocator& alloc, const Type& elementType, bool isPacked,
+                                      std::optional<ConstantRange> range,
+                                      syntax::DeferredSourceRange sourceRange);
 
     static bool isKind(SymbolKind kind) { return kind == SymbolKind::ErrorType; }
 

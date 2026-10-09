@@ -845,7 +845,7 @@ ConstantRange Type::getFixedRange() const {
     return {};
 }
 
-const Type* Type::getArrayElementType() const {
+const Type* Type::getArrayElementType(bool allowError) const {
     const Type& t = getCanonicalType();
     switch (t.kind) {
         case SymbolKind::PackedArrayType:
@@ -860,6 +860,15 @@ const Type* Type::getArrayElementType() const {
             return &t.as<AssociativeArrayType>().elementType;
         case SymbolKind::QueueType:
             return &t.as<QueueType>().elementType;
+        case SymbolKind::ErrorType:
+            if (allowError) {
+                const auto& error = t.as<ErrorType>();
+                if (error.arrayDimension)
+                    return &error.arrayDimension->elementType;
+                if (error.child)
+                    return error.child->getArrayElementType(true);
+            }
+            return nullptr;
         default:
             return nullptr;
     }
@@ -1255,15 +1264,18 @@ const Type& Type::fromSyntax(Compilation& comp, const Type& elementType,
     const Type* result = &elementType;
     size_t count = dimensions.size();
     for (size_t i = 0; i < count; i++) {
-        if (result->isError())
-            return *result;
-
         auto& syntax = *dimensions[count - i - 1];
+        if (result->isError()) {
+            // Retain outer dimensions without introducing cascading evaluation diagnostics.
+            result = &ErrorType::fromArray(comp, *result, false, std::nullopt, syntax);
+            continue;
+        }
         auto dim = context.evalDimension(syntax, /* requireRange */ false, /* isPacked */ false);
 
         switch (dim.kind) {
             case DimensionKind::Unknown:
-                return comp.getErrorType();
+                result = &ErrorType::fromArray(comp, *result, false, std::nullopt, syntax);
+                break;
             case DimensionKind::Range:
             case DimensionKind::AbbreviatedRange:
                 result = &FixedSizeUnpackedArrayType::fromDim(comp, context, *result, dim.range,

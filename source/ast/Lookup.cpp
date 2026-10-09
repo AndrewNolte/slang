@@ -1402,11 +1402,12 @@ const Symbol* Lookup::selectChild(const Symbol& initialSymbol,
     for (const ElementSelectSyntax* syntax : selectors) {
         if (symbol->kind != SymbolKind::InstanceArray &&
             symbol->kind != SymbolKind::GenerateBlockArray) {
-            // I think it's safe to assume that the symbol name here will not be empty
-            // because if it was, it'd be an instance array or generate array.
             auto& diag = result.addDiag(*context.scope, diag::ScopeNotIndexable,
                                         syntax->sourceRange());
-            diag << symbol->name;
+            if (symbol->name.empty())
+                diag << symbol->getHierarchicalPath();
+            else
+                diag << symbol->name;
             diag.addNote(diag::NoteDeclarationHere, symbol->location);
             return nullptr;
         }

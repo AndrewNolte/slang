@@ -619,6 +619,25 @@ endmodule
     CHECK(it == diags.end());
 }
 
+TEST_CASE("Excess instance array indices name the selected element") {
+    auto tree = SyntaxTree::fromText(R"(
+interface channel;
+    logic value;
+endinterface
+module sample;
+    channel channels[2][3]();
+    wire flag = channels[1][2][0].value;
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    auto& diags = compilation.getAllDiagnostics();
+    REQUIRE(diags.size() == 1);
+    CHECK(diags[0].code == diag::ScopeNotIndexable);
+    CHECK(std::get<std::string>(diags[0].args[0]) == "sample.channels[1][2]");
+}
+
 TEST_CASE("Generate array indexing") {
     auto tree = SyntaxTree::fromText(R"(
 module m;

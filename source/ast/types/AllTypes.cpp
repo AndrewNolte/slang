@@ -106,6 +106,11 @@ const Type& createPackedDims(const ASTContext& context, const Type* type,
     size_t count = dimensions.size();
     for (size_t i = 0; i < count; i++) {
         auto& dimSyntax = *dimensions[count - i - 1];
+        if (type->isError()) {
+            type = &ErrorType::fromArray(context.getCompilation(), *type, true, std::nullopt,
+                                         dimSyntax);
+            continue;
+        }
         auto dim = context.evalPackedDimension(dimSyntax);
         type = &PackedArrayType::fromSyntax(context, *type, dim, dimSyntax);
     }
@@ -122,9 +127,27 @@ using namespace syntax;
 
 const ErrorType ErrorType::Instance;
 
+const ErrorType& ErrorType::fromArray(BumpAllocator& alloc, const Type& elementType, bool isPacked,
+                                      std::optional<ConstantRange> range,
+                                      DeferredSourceRange sourceRange) {
+    auto result = alloc.emplace<ErrorType>();
+    result->arrayDimension.emplace(ArrayDimension{elementType, range, isPacked});
+    if (auto syntax = sourceRange.syntax())
+        result->setSyntax(*syntax);
+    return *result;
+}
+
 void ErrorType::serializeTo(ASTSerializer& serializer) const {
     if (child)
         serializer.write("child", *child);
+    if (arrayDimension) {
+        serializer.write("elementType", arrayDimension->elementType);
+        serializer.write("isPacked", arrayDimension->isPacked);
+        if (arrayDimension->range) {
+            auto range = *arrayDimension->range;
+            serializer.write("range", fmt::format("[{}:{}]", range.left, range.right));
+        }
+    }
 }
 
 IntegralType::IntegralType(SymbolKind kind, std::string_view name, SourceLocation loc,
@@ -701,29 +724,30 @@ const Type& PackedArrayType::fromSyntax(const ASTContext& context, const Type& e
                                         const EvaluatedDimension& dimension,
                                         const SyntaxNode& syntax) {
     auto& comp = context.getCompilation();
+    auto range = dimension.isRange() ? std::optional(dimension.range) : std::nullopt;
     if (elementType.isError())
-        return elementType;
+        return ErrorType::fromArray(comp, elementType, true, range, syntax);
 
     if (!elementType.isIntegral()) {
         if (elementType.getCanonicalType().kind == SymbolKind::DPIOpenArrayType)
             context.addDiag(diag::MultiplePackedOpenArrays, syntax.sourceRange());
         else
             context.addDiag(diag::PackedArrayNotIntegral, syntax.sourceRange()) << elementType;
-        return comp.getErrorType();
+        return ErrorType::fromArray(comp, elementType, true, range, syntax);
     }
 
     if (!dimension.isRange()) {
         if (dimension.kind == DimensionKind::DPIOpenArray) {
             if (elementType.isPackedArray()) {
                 context.addDiag(diag::MultiplePackedOpenArrays, syntax.sourceRange());
-                return comp.getErrorType();
+                return ErrorType::fromArray(comp, elementType, true, range, syntax);
             }
 
             auto result = comp.emplace<DPIOpenArrayType>(elementType, /* isPacked */ true);
             result->setSyntax(syntax);
             return *result;
         }
-        return comp.getErrorType();
+        return ErrorType::fromArray(comp, elementType, true, range, syntax);
     }
 
     return fromDim(comp, context, elementType, dimension.range, syntax);
@@ -733,14 +757,14 @@ const Type& PackedArrayType::fromDim(BumpAllocator& alloc, const ASTContext& con
                                      const Type& elementType, ConstantRange dim,
                                      DeferredSourceRange sourceRange) {
     if (elementType.isError())
-        return elementType;
+        return ErrorType::fromArray(alloc, elementType, true, dim, sourceRange);
 
     auto width = checkedMulU32(elementType.getBitWidth(), dim.width());
     if (!width || width > (uint32_t)SVInt::MAX_BITS) {
         uint64_t fullWidth = uint64_t(elementType.getBitWidth()) * dim.width();
         context.addDiag(diag::PackedTypeTooLarge, sourceRange.get())
             << fullWidth << (uint32_t)SVInt::MAX_BITS;
-        return ErrorType::Instance;
+        return ErrorType::fromArray(alloc, elementType, true, dim, sourceRange);
     }
 
     auto result = alloc.emplace<PackedArrayType>(elementType, dim, bitwidth_t(*width));
@@ -778,7 +802,7 @@ const Type& FixedSizeUnpackedArrayType::fromDim(BumpAllocator& alloc, const ASTC
                                                 const Type& elementType, ConstantRange dim,
                                                 DeferredSourceRange sourceRange) {
     if (elementType.isError())
-        return elementType;
+        return ErrorType::fromArray(alloc, elementType, false, dim, sourceRange);
 
     auto selectableWidth = checkedMulU64(elementType.getSelectableWidth(), dim.width());
     auto bitstreamWidth = checkedMulU64(elementType.getBitstreamWidth(), dim.width());
@@ -786,7 +810,7 @@ const Type& FixedSizeUnpackedArrayType::fromDim(BumpAllocator& alloc, const ASTC
     if (!selectableWidth || selectableWidth > MaxBitWidth || !bitstreamWidth ||
         bitstreamWidth > MaxBitWidth) {
         context.addDiag(diag::ObjectTooLarge, sourceRange.get());
-        return ErrorType::Instance;
+        return ErrorType::fromArray(alloc, elementType, false, dim, sourceRange);
     }
 
     auto result = alloc.emplace<FixedSizeUnpackedArrayType>(elementType, dim, *selectableWidth,
@@ -927,7 +951,8 @@ const Type& PackedStructType::fromSyntax(Compilation& comp, const StructUnionTyp
             if (!issuedError && structType->bitWidth > (uint32_t)SVInt::MAX_BITS) {
                 context.addDiag(diag::PackedTypeTooLarge, syntax.sourceRange())
                     << structType->bitWidth << (uint32_t)SVInt::MAX_BITS;
-                return comp.getErrorType(*structType);
+                return createPackedDims(parentContext, &comp.getErrorType(*structType),
+                                        syntax.dimensions);
             }
 
             if (decl->initializer) {
@@ -939,7 +964,7 @@ const Type& PackedStructType::fromSyntax(Compilation& comp, const StructUnionTyp
     }
 
     if (!structType->bitWidth || issuedError)
-        return comp.getErrorType(*structType);
+        return createPackedDims(parentContext, &comp.getErrorType(*structType), syntax.dimensions);
 
     // We added the fields in reverse order, so compute their actual
     // offsets in the right order now.
@@ -1124,7 +1149,7 @@ const Type& PackedUnionType::fromSyntax(Compilation& comp, const StructUnionType
     }
 
     if (!unionType->bitWidth || issuedError)
-        return comp.getErrorType(*unionType);
+        return createPackedDims(context, &comp.getErrorType(*unionType), syntax.dimensions);
 
     return createPackedDims(context, unionType, syntax.dimensions);
 }

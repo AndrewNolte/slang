@@ -292,7 +292,8 @@ public:
     ConstantRange getFixedRange() const;
 
     /// Returns the element type if this is an array type; otherwise returns nullptr.
-    const Type* getArrayElementType() const;
+    /// If @a allowError is true, also traverse array dimensions retained in error types.
+    const Type* getArrayElementType(bool allowError = false) const;
 
     /// Returns the index type if this is an associative array and it has a non-wildcard
     /// index type specified. Otherwise, returns nullptr.

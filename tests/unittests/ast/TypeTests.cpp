@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "Test.h"
+#include <catch2/generators/catch_generators.hpp>
 
 #include "slang/ast/Expression.h"
 #include "slang/ast/ScriptSession.h"
@@ -2814,6 +2815,123 @@ endmodule
     REQUIRE(dimensions);
     REQUIRE(dimensions->size() == 1);
     CHECK((*dimensions)[0]->getFirstToken().valueText() == "[");
+}
+
+TEST_CASE("Invalid arrays retain their dimensions and element types") {
+    bool knownCount = GENERATE(false, true);
+    bool knownWidth = GENERATE(false, true);
+    auto text = "module m #(parameter int COUNT"s + (knownCount ? " = 4" : "") +
+                ", parameter int WIDTH" + (knownWidth ? " = 3" : "") + R"();
+    typedef struct packed { logic [WIDTH-1:0] payload; int field; } item_t;
+    item_t unpacked_items[COUNT];
+    item_t [COUNT-1:0] packed_items;
+    typedef item_t [COUNT-1:0] packed_items_t;
+    packed_items_t mixed_items[COUNT][2];
+endmodule
+)";
+
+    CompilationOptions options;
+    options.flags |= CompilationFlags::AllowInvalidTop;
+    options.topModules.emplace("m");
+    Compilation compilation(options);
+    compilation.addSyntaxTree(SyntaxTree::fromText(text));
+    NO_COMPILATION_ERRORS;
+
+    auto& body = compilation.getRoot().lookupName<InstanceSymbol>("m").body;
+    for (auto name : {"unpacked_items", "packed_items", "mixed_items"}) {
+        CAPTURE(name, knownCount, knownWidth);
+        const Type* type = &body.find<VariableSymbol>(name).getType();
+        int rank = name == "mixed_items"sv ? 3 : 1;
+        for (int i = 0; i < rank; i++) {
+            if (!knownCount || !knownWidth) {
+                REQUIRE(type->isError());
+                CHECK_FALSE(type->isArray());
+                CHECK_FALSE(type->hasFixedRange());
+                CHECK(type->getBitWidth() == 0);
+                CHECK(type->getDefaultValue().bad());
+                CHECK(type->getArrayElementType() == nullptr);
+                auto& error = type->getCanonicalType().as<ErrorType>();
+                REQUIRE(error.arrayDimension);
+                CHECK(error.getSyntax());
+                CHECK(error.child == nullptr);
+                bool isPacked = name == "packed_items"sv || (rank == 3 && i == 2);
+                CHECK(error.arrayDimension->isPacked == isPacked);
+                if (!knownCount)
+                    CHECK_FALSE(error.arrayDimension->range);
+                if (knownCount && isPacked) {
+                    REQUIRE(error.arrayDimension->range);
+                    CHECK(*error.arrayDimension->range == ConstantRange(3, 0));
+                }
+            }
+            else {
+                CHECK_FALSE(type->isError());
+                CHECK(type->getArrayElementType() == type->getArrayElementType(true));
+            }
+            type = type->getArrayElementType(true);
+            REQUIRE(type);
+        }
+
+        type = &type->getCanonicalType();
+        if (!knownWidth) {
+            REQUIRE(type->isError());
+            type = type->as<ErrorType>().child;
+            REQUIRE(type);
+        }
+        REQUIRE(type->kind == SymbolKind::PackedStructType);
+        CHECK(type->as<PackedStructType>().find("field"));
+        CHECK(type->getArrayElementType(true) == nullptr);
+    }
+}
+
+TEST_CASE("Invalid aggregate array bounds do not repeat the same lookup error") {
+    auto elementType = GENERATE("struct packed { int field; }",
+                                "union packed { int field; bit [31:0] bits; }",
+                                "enum int { First, Last }");
+    auto text = "module m;\n    "s + elementType + R"( [MISSING-1:0][MISSING-1:0] items;
+    missing_type independent_error;
+endmodule
+)";
+    Compilation compilation;
+    compilation.addSyntaxTree(SyntaxTree::fromText(text));
+    auto& diags = compilation.getAllDiagnostics();
+    INFO(report(diags));
+    REQUIRE(diags.size() == 2);
+    CHECK(diags[0].code == diag::UndeclaredIdentifier);
+    CHECK(diags[0].location.offset() == text.rfind("MISSING"));
+    CHECK(diags[1].code == diag::UndeclaredIdentifier);
+    CHECK(diags[1].location.offset() == text.find("missing_type"));
+}
+
+TEST_CASE("Invalid anonymous aggregate arrays preserve element scopes") {
+    auto tree = SyntaxTree::fromText(R"(
+module m;
+    struct packed { real field; } [1:0] structs;
+    union packed { byte narrow; int wide; } [2:0] unions;
+    enum bit [1:0][2:0] { A } [3:0] enums;
+endmodule
+)");
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    auto& diags = compilation.getAllDiagnostics();
+    REQUIRE(diags.size() == 3);
+    CHECK(diags[0].code == diag::PackedMemberNotIntegral);
+    CHECK(diags[1].code == diag::PackedUnionWidthMismatch);
+    CHECK(diags[2].code == diag::InvalidEnumBase);
+
+    auto& body = compilation.getRoot().lookupName<InstanceSymbol>("m").body;
+    for (auto name : {"structs", "unions", "enums"}) {
+        CAPTURE(name);
+        auto& type = body.find<VariableSymbol>(name).getType();
+        REQUIRE(type.isError());
+        CHECK(type.getArrayElementType() == nullptr);
+        auto element = type.getArrayElementType(true);
+        REQUIRE(element);
+        REQUIRE(element->isError());
+        auto child = element->as<ErrorType>().child;
+        REQUIRE(child);
+        CHECK(child->isScope());
+        CHECK_FALSE(child->as<Scope>().members().empty());
+    }
 }
 
 TEST_CASE("Packed struct member cannot have initializer") {

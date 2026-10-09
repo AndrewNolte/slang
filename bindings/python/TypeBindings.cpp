@@ -82,7 +82,10 @@ void registerTypes(nb::module_& m) {
         .def_prop_ro("integralFlags", &Type::getIntegralFlags)
         .def_prop_ro("defaultValue", &Type::getDefaultValue)
         .def_prop_ro("fixedRange", &Type::getFixedRange)
-        .def_prop_ro("arrayElementType", &Type::getArrayElementType, byrefint)
+        .def_prop_ro(
+            "arrayElementType", [](const Type& self) { return self.getArrayElementType(); },
+            byrefint)
+        .def("getArrayElementType", &Type::getArrayElementType, byrefint, "allowError"_a = false)
         .def_prop_ro("associativeIndexType", &Type::getAssociativeIndexType, byrefint)
         .def_prop_ro("canBeStringLike", &Type::canBeStringLike)
         .def_prop_ro("isIterable", &Type::isIterable)
@@ -255,7 +258,15 @@ void registerTypes(nb::module_& m) {
     SIMPLE_TYPE(UntypedType);
     SIMPLE_TYPE(SequenceType);
     SIMPLE_TYPE(PropertyType);
-    SIMPLE_TYPE(ErrorType);
+    auto errorType = nb::class_<ErrorType, Type>(m, "ErrorType");
+    nb::class_<ErrorType::ArrayDimension>(errorType, "ArrayDimension")
+        .def_prop_ro(
+            "elementType", [](const ErrorType::ArrayDimension& self) { return &self.elementType; },
+            byrefint)
+        .def_ro("range", &ErrorType::ArrayDimension::range)
+        .def_ro("isPacked", &ErrorType::ArrayDimension::isPacked);
+    errorType.def_ro("child", &ErrorType::child, byrefint)
+        .def_ro("arrayDimension", &ErrorType::arrayDimension, byrefint);
 
     nb::class_<VirtualInterfaceType, Type>(m, "VirtualInterfaceType")
         .def_prop_ro(

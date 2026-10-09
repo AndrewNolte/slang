@@ -70,6 +70,7 @@ public:
     /// arrays' elements list, always zero based. This is not necessarily what the
     /// user wrote in the source code; the array dimensions are needed to translate
     /// from this canonical space back to the source code indices.
+    /// Empty for uninstantiated elements retained under an invalid array dimension.
     std::span<const uint32_t> arrayPath;
 
     /// If this instance is part of an array, walk upward to find the array's name.
