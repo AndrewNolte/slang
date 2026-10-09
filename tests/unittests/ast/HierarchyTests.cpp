@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "Test.h"
+#include <catch2/generators/catch_generators.hpp>
 
 #include "slang/ast/ASTVisitor.h"
 #include "slang/ast/symbols/BlockSymbols.h"
@@ -9,6 +10,7 @@
 #include "slang/ast/symbols/InstanceSymbols.h"
 #include "slang/ast/symbols/MemberSymbols.h"
 #include "slang/ast/symbols/ParameterSymbols.h"
+#include "slang/ast/symbols/VariableSymbols.h"
 #include "slang/syntax/AllSyntax.h"
 #include "slang/text/SourceManager.h"
 
@@ -619,6 +621,173 @@ endmodule
     CHECK((it++)->code == diag::ConstEvalNonConstVariable);
     CHECK((it++)->code == diag::LabelAndName);
     CHECK(it == diags.end());
+}
+
+TEST_CASE("Invalid generate loops retain uninstantiated bodies") {
+    auto [header, diagnostic] =
+        GENERATE(std::pair{" = 0; i < 2; i++", diag::ExpectedIdentifier},
+                 std::pair{"genvar i = missing; i < 2; i++", diag::UndeclaredIdentifier},
+                 std::pair{"genvar i = 0; i < missing; i++", diag::UndeclaredIdentifier},
+                 std::pair{"genvar i = 0; i < 2; i += missing", diag::UndeclaredIdentifier},
+                 std::pair{"genvar i = value; i < 2; i++", diag::ConstEvalNonConstVariable},
+                 std::pair{"genvar i = 0; i < value; i++", diag::ConstEvalNonConstVariable},
+                 std::pair{"genvar i = 0; i < 2; i += value", diag::ConstEvalNonConstVariable},
+                 std::pair{"genvar i = 0; non_boolean; i++", diag::NotBooleanConvertible},
+                 std::pair{"genvar i = 0; i < 100; i++", diag::MaxGenerateStepsExceeded},
+                 std::pair{"genvar i = 0; i < 2; i += 0", diag::GenvarDuplicate},
+                 std::pair{"missing = 0; missing < 2; missing++", diag::UndeclaredIdentifier},
+                 std::pair{"value = 0; value < 2; value++", diag::NotAGenvar});
+    CAPTURE(header);
+    auto text = R"(
+module m;
+    int value;
+    struct { int member; } non_boolean;
+    for ()"s + header +
+                R"() begin : items
+        int field;
+        unknown_type suppressed_error;
+    end
+endmodule
+)";
+    CompilationOptions options;
+    options.maxGenerateSteps = 4;
+    Compilation compilation(options);
+    compilation.addSyntaxTree(SyntaxTree::fromText(text));
+    auto& diags = compilation.getAllDiagnostics();
+    REQUIRE(diags.size() == 1);
+    CHECK(diags[0].code == diagnostic);
+
+    auto& body = compilation.getRoot().lookupName<InstanceSymbol>("m").body;
+    auto& array = body.find<GenerateBlockArraySymbol>("items");
+    CHECK_FALSE(array.valid);
+    CHECK(array.entries.empty());
+    CHECK(body.lookupName("items[0]") == nullptr);
+
+    size_t blocks = 0;
+    for (auto& block : array.membersOfType<GenerateBlockSymbol>()) {
+        ++blocks;
+        CHECK(block.isUninstantiated);
+        CHECK(block.branchKind == GenerateBranchKind::LoopIteration);
+        CHECK(block.getParentScope() == &array);
+        REQUIRE(block.getSyntax());
+        CHECK(block.getSyntax()->kind == SyntaxKind::GenerateBlock);
+        auto& field = block.find<VariableSymbol>("field");
+        CHECK(field.getType().isIntegral());
+        CHECK(field.getParentScope() == &block);
+    }
+    CHECK(blocks == 1);
+}
+
+TEST_CASE("Check uninstantiated diagnoses failed generate loop bodies") {
+    bool checkUninstantiated = GENERATE(false, true);
+    auto [header, loopDiagnostic] =
+        GENERATE(std::pair{" = 0; i < 2; i++", diag::ExpectedIdentifier},
+                 std::pair{"genvar i = value; i < 2; i++", diag::ConstEvalNonConstVariable},
+                 std::pair{"genvar i = 0; i < missing; i++", diag::UndeclaredIdentifier},
+                 std::pair{"genvar i = 0; i < 2; i += missing", diag::UndeclaredIdentifier},
+                 std::pair{"genvar i = 0; i < 100; i++", diag::MaxGenerateStepsExceeded});
+    CAPTURE(checkUninstantiated, header);
+    auto text = R"(
+module child(input logic value);
+endmodule
+
+module m;
+    int value;
+    for ()"s + header +
+                R"() begin : items
+        missing_type independent_error;
+        child inst(.value(1'b0), .missing_port(1'b0));
+        missing_module unknown_inst();
+        string message;
+        initial message.missing_method();
+        logic [1:0] bits;
+        wire out_of_bounds = bits[9];
+    end
+endmodule
+)";
+    CompilationOptions options;
+    options.maxGenerateSteps = 4;
+    if (checkUninstantiated)
+        options.flags |= CompilationFlags::CheckUninstantiated;
+    Compilation compilation(options);
+    compilation.addSyntaxTree(SyntaxTree::fromText(text));
+    auto& diags = compilation.getAllDiagnostics();
+    INFO(report(diags));
+    REQUIRE(diags.size() == (checkUninstantiated ? 5 : 1));
+    CHECK(diags[0].code == loopDiagnostic);
+    if (checkUninstantiated) {
+        CHECK(diags[1].code == diag::UndeclaredIdentifier);
+        CHECK(diags[1].location.offset() == text.find("missing_type"));
+        CHECK(diags[2].code == diag::PortDoesNotExist);
+        CHECK(diags[2].location.offset() == text.find("missing_port"));
+        CHECK(diags[3].code == diag::UnknownModule);
+        CHECK(diags[3].location.offset() == text.find("missing_module"));
+        CHECK(diags[4].code == diag::UnknownSystemMethod);
+        CHECK(diags[4].location.offset() == text.find("missing_method"));
+    }
+    CHECK_FALSE(std::ranges::any_of(diags, [](auto& diag) { return diag.code == diag::IndexOOB; }));
+}
+
+TEST_CASE("Check uninstantiated diagnoses nested failed generate loop bodies") {
+    auto text = R"(
+module m #(parameter int START, COUNT);
+    for (genvar i = START; i < COUNT; i++) begin : outer
+        for (genvar j = START; j < COUNT; j++) begin : inner
+            missing_type independent_error;
+        end
+    end
+endmodule
+)"sv;
+    CompilationOptions options;
+    options.flags |= CompilationFlags::AllowInvalidTop | CompilationFlags::CheckUninstantiated;
+    options.topModules.emplace("m");
+    Compilation compilation(options);
+    compilation.addSyntaxTree(SyntaxTree::fromText(text));
+    auto& diags = compilation.getAllDiagnostics();
+    INFO(report(diags));
+    REQUIRE(diags.size() == 1);
+    CHECK(diags[0].code == diag::UndeclaredIdentifier);
+    CHECK(diags[0].location.offset() == text.find("missing_type"));
+}
+
+TEST_CASE("Nested generate bodies survive unknown top parameters") {
+    auto tree = SyntaxTree::fromText(R"(
+module m #(parameter int START, COUNT);
+    for (genvar i = START; i < COUNT; i++) begin : outer
+        int outer_field;
+        for (genvar j = START; j < COUNT; j++) begin : inner
+            int inner_field;
+        end
+    end
+endmodule
+)");
+    CompilationOptions options;
+    options.flags |= CompilationFlags::AllowInvalidTop;
+    options.topModules.emplace("m");
+    Compilation compilation(options);
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+
+    auto& body = compilation.getRoot().lookupName<InstanceSymbol>("m").body;
+    auto& outer = body.find<GenerateBlockArraySymbol>("outer");
+    CHECK_FALSE(outer.valid);
+    CHECK(outer.entries.empty());
+    CHECK(body.lookupName("outer[0]") == nullptr);
+    auto outerBlocks = outer.membersOfType<GenerateBlockSymbol>();
+    REQUIRE(outerBlocks.begin() != outerBlocks.end());
+    auto& outerBlock = *outerBlocks.begin();
+    CHECK(outerBlock.isUninstantiated);
+    CHECK(outerBlock.find("outer_field"));
+    CHECK(outerBlock.find<ParameterSymbol>("i").isFromGenvar());
+    auto& inner = outerBlock.find<GenerateBlockArraySymbol>("inner");
+    CHECK_FALSE(inner.valid);
+    CHECK(inner.entries.empty());
+    auto innerBlocks = inner.membersOfType<GenerateBlockSymbol>();
+    REQUIRE(innerBlocks.begin() != innerBlocks.end());
+    auto& innerBlock = *innerBlocks.begin();
+    CHECK(innerBlock.isUninstantiated);
+    CHECK(innerBlock.find("inner_field"));
+    CHECK(innerBlock.find<ParameterSymbol>("j").isFromGenvar());
 }
 
 TEST_CASE("Case generate corner cases") {
