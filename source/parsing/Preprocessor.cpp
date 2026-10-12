@@ -851,10 +851,16 @@ Trivia Preprocessor::handleDefineDirective(Token directive) {
         }
         else if (it->second.commandLine)
             bad = true; // not really bad, but commandLine args has precedence so we skip this
-        else if (!bad && it->second.valid() && !isSameMacro(*result, *it->second.syntax)) {
-            auto& diag = addDiag(diag::RedefiningMacro, name.range());
-            diag << name.valueText();
-            diag.addNote(diag::NotePreviousDefinition, it->second.syntax->name.location());
+        else if (!bad && it->second.valid()) {
+            if (!isSameMacro(*result, *it->second.syntax)) {
+                auto& diag = addDiag(diag::RedefiningMacro, name.range());
+                diag << name.valueText();
+                diag.addNote(diag::NotePreviousDefinition, it->second.syntax->name.location());
+            }
+            metadata.macroRefs.push_back(MacroRefMetadata{
+                .syntax = result,
+                .definition = it->second.syntax,
+            });
         }
     }
 
