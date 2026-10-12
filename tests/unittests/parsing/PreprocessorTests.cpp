@@ -298,6 +298,53 @@ int b = `BAR(2);
     CHECK(cloned->getDefinedMacros().empty());
 }
 
+TEST_CASE("Macro references retain replaced definitions") {
+    auto tree = SyntaxTree::fromText(R"(
+`define VALUE(first) first
+`define VALUE(second) second
+`define VALUE(second) second
+int result = `VALUE(1);
+`undef VALUE
+)");
+    auto refs = tree->getMacroRefs();
+    REQUIRE(refs.size() == 4);
+    REQUIRE(refs[0].syntax->kind == SyntaxKind::DefineDirective);
+    CHECK(refs[0].definition->formalArguments->args[0]->name.valueText() == "first");
+    REQUIRE(refs[1].syntax->kind == SyntaxKind::DefineDirective);
+    CHECK(refs[1].definition == refs[0].syntax);
+    CHECK(refs[1].definition->formalArguments->args[0]->name.valueText() == "second");
+    CHECK(refs[2].syntax->kind == SyntaxKind::MacroUsage);
+    CHECK(refs[2].definition == refs[1].syntax);
+    CHECK(refs[3].syntax->kind == SyntaxKind::UndefDirective);
+    CHECK(refs[3].definition == refs[1].syntax);
+}
+
+TEST_CASE("Rejected macro redefinitions do not record replacements") {
+    PreprocessorOptions options;
+    options.predefines.emplace_back("VALUE(command_arg)=command_arg");
+    auto tree = SyntaxTree::fromText(R"(
+`define VALUE(source_arg) source_arg
+int result = `VALUE(1);
+)",
+                                     Bag(options));
+    CHECK(tree->diagnostics().empty());
+    auto refs = tree->getMacroRefs();
+    REQUIRE(refs.size() == 1);
+    CHECK(refs[0].syntax->kind == SyntaxKind::MacroUsage);
+    CHECK(refs[0].definition->formalArguments->args[0]->name.valueText() == "command_arg");
+}
+
+TEST_CASE("Macro redefinitions retain inherited definitions") {
+    SourceManager sm;
+    auto first = SyntaxTree::fromText("`define VALUE(first) first\n", sm);
+    auto buffer = sm.assignText("`define VALUE(second) second\n");
+    auto second = SyntaxTree::fromBuffer(buffer, sm, {}, first->getDefinedMacros());
+    auto refs = second->getMacroRefs();
+    REQUIRE(refs.size() == 1);
+    CHECK(refs[0].syntax->kind == SyntaxKind::DefineDirective);
+    CHECK(refs[0].definition->formalArguments->args[0]->name.valueText() == "first");
+}
+
 TEST_CASE("SyntaxTree metadata tracks pushed source buffers") {
     SourceManager sm;
     sm.setDisableProximatePaths(true);

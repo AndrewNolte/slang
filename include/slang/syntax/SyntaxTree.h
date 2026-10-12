@@ -237,7 +237,7 @@ public:
     /// This is empty if created from a SyntaxRewriter.
     IncludeList getIncludeDirectives() const { return preprocessorMetadata.includeDirectives; }
 
-    /// Gets the list of macro references that were expanded while parsing.
+    /// Gets the macro usages, undefinitions, and redefinitions encountered while parsing.
     /// This is empty if created from a SyntaxRewriter.
     MacroRefList getMacroRefs() const { return preprocessorMetadata.macroRefs; }
 
