@@ -23,11 +23,11 @@ struct SLANG_EXPORT IncludeMetadata {
     bool isSystem;
 };
 
-/// Metadata about a macro reference (usage or undef) and its active definition.
+/// Metadata about a macro usage, undefinition, or redefinition and its prior definition.
 struct SLANG_EXPORT MacroRefMetadata {
-    /// The syntax node referencing the macro (MacroUsage or UndefDirective)
+    /// The referencing MacroUsage, UndefDirective, or replacing DefineDirective syntax.
     const syntax::SyntaxNode* syntax;
-    /// The macro definition that was used for the expansion
+    /// The macro definition that was expanded, removed, or replaced.
     const syntax::DefineDirectiveSyntax* definition;
 };
 
@@ -39,7 +39,7 @@ struct SLANG_EXPORT PreprocessorMetadata {
     /// The include directives that were encountered while preprocessing.
     std::vector<IncludeMetadata> includeDirectives;
 
-    /// The macro references that were expanded while preprocessing.
+    /// The macro usages, undefinitions, and redefinitions encountered while preprocessing.
     std::vector<MacroRefMetadata> macroRefs;
 
     /// The source buffer IDs that were pushed into the preprocessor, in order.
