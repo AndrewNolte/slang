@@ -138,6 +138,29 @@ endclocking : clk
                       SyntaxKind::ClockingDeclaration);
 }
 
+TEST_CASE("Incomplete named parameter lists retain instantiation syntax") {
+    for (auto text : {"module top; child #(.", "module top; child #(.WIDTH",
+                      "module top; child #(.A(1), .B(2), .C(3), .D"}) {
+        auto tree = SyntaxTree::fromText(text);
+        auto& module = tree->root().as<ModuleDeclarationSyntax>();
+        REQUIRE(module.members.size() == 1);
+        REQUIRE(module.members[0]->kind == SyntaxKind::HierarchyInstantiation);
+        auto& instance = module.members[0]->as<HierarchyInstantiationSyntax>();
+        REQUIRE(instance.parameters);
+        auto& parameters = instance.parameters->parameters;
+        REQUIRE(!parameters.empty());
+        CHECK(parameters[parameters.size() - 1]->kind == SyntaxKind::NamedParamAssignment);
+        CHECK(instance.parameters->closeParen.isMissing());
+        REQUIRE(tree->getMetadata().globalInstances.size() == 1);
+        CHECK(tree->getMetadata().globalInstances[0] == &instance);
+        CHECK(module.toString() == text);
+    }
+
+    parseModuleMember("Generic #(.WIDTH(4)) value;", SyntaxKind::DataDeclaration);
+    parseModuleMember("child #(.WIDTH(4)) inst();", SyntaxKind::HierarchyInstantiation);
+    parseModuleMember("and #(1, 2) gate_inst(out, in1, in2);", SyntaxKind::PrimitiveInstantiation);
+}
+
 TEST_CASE("Parse buffer resize") {
     // Test the resizing codepath for the parse speculation buffer.
     parseModuleMember("parameter foo[1+1+1+1+1+1+1+1+1+1+1+1+1+1+1];",
@@ -349,7 +372,7 @@ endmodule
     parseCompilationUnit(text);
 
     REQUIRE(diagnostics.size() == 3);
-    CHECK(diagnostics[0].code == diag::ExpectedIdentifier);
+    CHECK(diagnostics[0].code == diag::ExpectedToken);
     CHECK(diagnostics[1].code == diag::ExpectedToken);
     CHECK(diagnostics[2].code == diag::ExpectedToken);
 }
