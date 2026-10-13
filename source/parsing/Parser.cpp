@@ -1419,9 +1419,12 @@ bool Parser::isHierarchyInstantiation(bool requireName) {
             return false;
 
         index++;
+        const bool namedParameters = peek(index).kind == TokenKind::Dot;
         if (!scanTypePart<isNotInType>(index, TokenKind::OpenParenthesis,
                                        TokenKind::CloseParenthesis)) {
-            return false;
+            // Preserve named assignments when the list is incomplete instead of parsing
+            // them as primitive delays. Completed lists still disambiguate below.
+            return !requireName && namedParameters;
         }
     }
 
