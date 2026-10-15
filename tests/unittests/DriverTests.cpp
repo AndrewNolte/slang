@@ -3,6 +3,7 @@
 
 #include "Test.h"
 #include <boost_regex.hpp>
+#include <catch2/generators/catch_generators.hpp>
 #include <fmt/format.h>
 #include <fstream>
 
@@ -56,6 +57,31 @@ TEST_CASE("Driver valid column unit") {
     CHECK(driver.parseCommandLine(3, argv2));
     CHECK(driver.processOptions());
     CHECK(driver.options.diagColumnUnit == ColumnUnit::Display);
+}
+
+TEST_CASE("Driver generic class scope compatibility") {
+    std::string_view args = GENERATE("", "--allow-generic-class-scope", "--compat=all",
+                                     "--compat=all --allow-generic-class-scope=false");
+    CAPTURE(args);
+    Driver driver;
+    driver.addStandardArgs();
+    REQUIRE(driver.parseCommandLine(fmt::format("test {}", args)));
+    REQUIRE(driver.processOptions(false));
+    driver.syntaxTrees.push_back(SyntaxTree::fromText(R"(
+class Generic #(int WIDTH = 8);
+endclass
+module m;
+    localparam int WIDTH = Generic::WIDTH;
+endmodule
+)"));
+    auto compilation = driver.createCompilation();
+    auto& diags = compilation->getAllDiagnostics();
+    if (args == "--allow-generic-class-scope" || args == "--compat=all")
+        CHECK(diags.empty());
+    else {
+        REQUIRE(diags.size() == 1);
+        CHECK(diags[0].code == diag::GenericClassScopeResolution);
+    }
 }
 
 TEST_CASE("Driver file preprocess -- obfuscation") {

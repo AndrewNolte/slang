@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "Test.h"
+#include <catch2/generators/catch_generators.hpp>
 
 #include "slang/ast/EvalContext.h"
 #include "slang/ast/Expression.h"
@@ -10,6 +11,7 @@
 #include "slang/ast/symbols/InstanceSymbols.h"
 #include "slang/ast/symbols/ParameterSymbols.h"
 #include "slang/ast/symbols/SubroutineSymbols.h"
+#include "slang/ast/symbols/VariableSymbols.h"
 #include "slang/syntax/AllSyntax.h"
 
 static constexpr const char* PacketClass = R"(
@@ -326,6 +328,7 @@ endmodule
 }
 
 TEST_CASE("Generic class names") {
+    auto allowScope = GENERATE(false, true);
     auto tree = SyntaxTree::fromText(R"(
 class C #(int p = 1);
     function void foo();
@@ -361,7 +364,7 @@ module m;
     typedef int Int;
     Int #(4) i1; // error, not a class
 
-    localparam int p1 = C::p; // error
+    localparam int p1 = C::p; // requires compatibility flag
     localparam int p2 = C#()::p;
     localparam int p3 = D#(.r(5))::r;
 
@@ -370,20 +373,109 @@ module m;
 endmodule
 )");
 
-    Compilation compilation;
+    CompilationOptions options;
+    if (allowScope)
+        options.flags |= CompilationFlags::AllowGenericClassScope;
+    Compilation compilation(options);
     compilation.addSyntaxTree(tree);
 
     auto& m = compilation.getRoot().lookupName<InstanceSymbol>("m").body;
+    if (allowScope)
+        CHECK(m.find<ParameterSymbol>("p1").getValue().integer() == 1);
     CHECK(m.find<ParameterSymbol>("p2").getValue().integer() == 1);
     CHECK(m.find<ParameterSymbol>("p3").getValue().integer() == 5);
 
     auto& diags = compilation.getAllDiagnostics();
-    REQUIRE(diags.size() == 5);
+    REQUIRE(diags.size() == (allowScope ? 4 : 5));
     CHECK(diags[0].code == diag::UndeclaredIdentifier);
     CHECK(diags[1].code == diag::UndeclaredIdentifier);
     CHECK(diags[2].code == diag::NoDefaultSpecialization);
     CHECK(diags[3].code == diag::NotAGenericClass);
-    CHECK(diags[4].code == diag::GenericClassScopeResolution);
+    if (!allowScope)
+        CHECK(diags[4].code == diag::GenericClassScopeResolution);
+}
+
+TEST_CASE("Generic class scope compatibility preserves specializations") {
+    auto tree = SyntaxTree::fromText(R"(
+package sample_pkg;
+    class Factory #(type T = int);
+        static function T create();
+            T value;
+            return value;
+        endfunction
+    endclass
+
+    class Generic #(int WIDTH = 8, type T = bit [WIDTH-1:0]);
+        typedef T value_t;
+        typedef Factory#(T) type_id;
+        localparam int SELF_WIDTH = Generic::WIDTH;
+        localparam int TYPE_WIDTH = $bits(Generic::value_t);
+    endclass
+endpackage
+
+module m;
+    import sample_pkg::*;
+    Generic::value_t default_value;
+    localparam int DEFAULT_WIDTH = Generic::WIDTH;
+    localparam int QUALIFIED_WIDTH = sample_pkg::Generic::WIDTH;
+    localparam int FACTORY_WIDTH = $bits(sample_pkg::Generic::type_id::create());
+    localparam int CURRENT_WIDTH = Generic#(13)::SELF_WIDTH;
+    localparam int CURRENT_TYPE_WIDTH = Generic#(13)::TYPE_WIDTH;
+    localparam int EXPLICIT_WIDTH = Generic#(21)::WIDTH;
+    typedef Generic#(34) specialized_t;
+    localparam int ALIAS_WIDTH = specialized_t::WIDTH;
+endmodule
+)");
+
+    CompilationOptions options;
+    options.flags |= CompilationFlags::AllowGenericClassScope;
+    Compilation compilation(options);
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+
+    auto& m = compilation.getRoot().lookupName<InstanceSymbol>("m").body;
+    CHECK(m.find<VariableSymbol>("default_value").getType().getBitWidth() == 8);
+    CHECK(m.find<ParameterSymbol>("DEFAULT_WIDTH").getValue().integer() == 8);
+    CHECK(m.find<ParameterSymbol>("QUALIFIED_WIDTH").getValue().integer() == 8);
+    CHECK(m.find<ParameterSymbol>("FACTORY_WIDTH").getValue().integer() == 8);
+    CHECK(m.find<ParameterSymbol>("CURRENT_WIDTH").getValue().integer() == 13);
+    CHECK(m.find<ParameterSymbol>("CURRENT_TYPE_WIDTH").getValue().integer() == 13);
+    CHECK(m.find<ParameterSymbol>("EXPLICIT_WIDTH").getValue().integer() == 21);
+    CHECK(m.find<ParameterSymbol>("ALIAS_WIDTH").getValue().integer() == 34);
+}
+
+TEST_CASE("Generic class scope compatibility retains errors") {
+    auto tree = SyntaxTree::fromText(R"(
+class RequiredValue #(int WIDTH);
+    localparam int VALUE = 1;
+endclass
+class RequiredType #(type T);
+    typedef int value_t;
+endclass
+class Generic #(int WIDTH = 8);
+    local static int hidden;
+    protected static int guarded;
+endclass
+module m;
+    localparam int VALUE = RequiredValue::VALUE;
+    RequiredType::value_t value;
+    int hidden = Generic::hidden;
+    int guarded = Generic::guarded;
+endmodule
+)");
+
+    CompilationOptions options;
+    options.flags |= CompilationFlags::AllowGenericClassScope;
+    Compilation compilation(options);
+    compilation.addSyntaxTree(tree);
+    auto& diags = compilation.getAllDiagnostics();
+    REQUIRE(diags.size() == 6);
+    CHECK(diags[0].code == diag::NoDefaultSpecialization);
+    CHECK(diags[1].code == diag::NoDefaultSpecialization);
+    CHECK(diags[2].code == diag::LocalMemberAccess);
+    CHECK(diags[3].code == diag::LocalMemberAccess);
+    CHECK(diags[4].code == diag::ProtectedMemberAccess);
+    CHECK(diags[5].code == diag::ProtectedMemberAccess);
 }
 
 TEST_CASE("Generic class typedefs") {
