@@ -371,6 +371,9 @@ void Driver::addStandardArgs() {
     addCompFlag(CompilationFlags::InferInputPortsAsVars, "--infer-input-ports-as-vars",
                 "Infer ANSI input ports that have an explicit data type as variables instead "
                 "of nets. By default such ports are treated as nets, following the LRM.");
+    addCompFlag(CompilationFlags::AllowGenericClassScope, "--allow-generic-class-scope",
+                "Allow unspecialized generic class names before :: to use their default "
+                "specializations");
 
     cmdLine.setGroup("Actions");
     addCompFlag(CompilationFlags::LintMode, "--lint-only",
