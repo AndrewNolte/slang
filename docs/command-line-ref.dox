@@ -716,6 +716,19 @@ endmodule
 
 This option is enabled automatically when `--compat=vcs` or `--compat=all` is used.
 
+`--allow-generic-class-scope`
+
+Allow an unspecialized generic class name before `::` to use its default specialization.
+For example, outside the class, `C::member` is treated as `C#()::member`. All class parameters
+must have defaults; classes with required parameters still produce an error. Within the class
+itself, the name continues to refer to the current specialization.
+
+This also applies to package-qualified names and nested class scopes, such as
+`pkg::C::type_id::create()`. Without this option, SystemVerilog requires explicit parameter
+assignments or a typedef naming a specialization.
+
+This option is enabled automatically when `--compat=all` is used.
+
 `--cmd-ignore <vendor_cmd>,<N>`
 
 Define rule to ignore vendor command &lt;vendor_cmd> with its following &lt;N> parameters.

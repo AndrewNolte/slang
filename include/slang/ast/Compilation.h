@@ -151,8 +151,12 @@ enum class SLANG_EXPORT CompilationFlags {
     /// (untaken generate branches and uninstantiated module instances) so that
     /// additional lints, like port and parameter name checks, can run on it.
     CheckUninstantiated = 1 << 21,
+
+    /// Allow an unspecialized generic class name before :: to use the default
+    /// specialization when referenced outside the class itself.
+    AllowGenericClassScope = 1 << 22,
 };
-SLANG_BITMASK(CompilationFlags, CheckUninstantiated)
+SLANG_BITMASK(CompilationFlags, AllowGenericClassScope)
 
 /// Contains various options that can control compilation behavior.
 struct SLANG_EXPORT CompilationOptions {
