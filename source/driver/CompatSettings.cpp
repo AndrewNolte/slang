@@ -45,7 +45,8 @@ static constexpr CompilationFlags allCompFlags[] = {
     VCS_COMP_FLAGS,
     CompilationFlags::AllowTopLevelIfacePorts,
     CompilationFlags::AllowUnnamedGenerate,
-    CompilationFlags::AllowVirtualIfaceWithOverride
+    CompilationFlags::AllowVirtualIfaceWithOverride,
+    CompilationFlags::AllowGenericClassScope
 };
 
 #define VCS_ANALYSIS_FLAGS \
