@@ -395,7 +395,9 @@ Statement& ForeachLoopStatement::fromSyntax(Compilation& compilation,
     auto guard = stmtCtx.enterLoop();
 
     auto& arrayRef = Expression::bind(*syntax.loopList->arrayName, context);
-    SLANG_ASSERT(!arrayRef.bad());
+    // Package exports can re-enter this block before its iterator variables are elaborated.
+    if (arrayRef.bad())
+        return badStmt(compilation, nullptr);
 
     // Loop variables were already built in the containing block when it was elaborated,
     // so we just have to find them and associate them with the correct dim ranges here.
