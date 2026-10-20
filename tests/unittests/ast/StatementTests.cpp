@@ -6,12 +6,54 @@
 #include "slang/ast/statements/ConditionalStatements.h"
 #include "slang/ast/statements/MiscStatements.h"
 #include "slang/ast/symbols/BlockSymbols.h"
+#include "slang/ast/symbols/ClassSymbols.h"
 #include "slang/ast/symbols/CompilationUnitSymbols.h"
 #include "slang/ast/symbols/InstanceSymbols.h"
 #include "slang/ast/symbols/MemberSymbols.h"
 #include "slang/ast/symbols/ParameterSymbols.h"
+#include "slang/ast/symbols/SubroutineSymbols.h"
 #include "slang/ast/symbols/VariableSymbols.h"
+#include "slang/ast/types/AllTypes.h"
 #include "slang/ast/types/Type.h"
+
+TEST_CASE("Recursive package elaboration while creating foreach iterators") {
+    auto tree = SyntaxTree::fromText(R"(
+package data_pkg;
+    typedef int payload_t;
+endpackage
+interface bus_if;
+    import types_pkg::*;
+    payload_t data;
+endinterface
+package types_pkg;
+    import data_pkg::*;
+    export *::*;
+    class Base #(type T = int); endclass
+    class Config #(int N = 2) extends Base #(virtual bus_if);
+        bit [N-1:0] values;
+    endclass
+    class Consumer #(int N = 2);
+        Config #(N) cfg;
+        function void run();
+            foreach (cfg.values[i]) begin end
+        endfunction
+    endclass
+endpackage
+)");
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    auto* package = compilation.getPackage("types_pkg");
+    REQUIRE(package);
+    auto& generic = package->find<GenericClassDefSymbol>("Consumer");
+    auto* specialization = generic.getDefaultSpecialization(*package);
+    REQUIRE(specialization);
+    auto& method = specialization->as<ClassType>().find<SubroutineSymbol>("run");
+    for (auto& block : method.membersOfType<StatementBlockSymbol>())
+        (void)block.members();
+    auto& diags = compilation.getAllDiagnostics();
+    REQUIRE(diags.size() == 1);
+    CHECK(diags[0].code == diag::UndeclaredIdentifier);
+}
 
 TEST_CASE("For loop statements") {
     auto tree = SyntaxTree::fromText(R"(
