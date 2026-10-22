@@ -41,7 +41,8 @@ namespace slang::parsing {
 /// Contains various options that can control preprocessing behavior.
 struct SLANG_EXPORT PreprocessorOptions {
     /// The maximum depth of the include stack; further attempts to include
-    /// a file will result in an error.
+    /// a file will result in an error. Exceeding a nonzero limit disables further
+    /// include expansion for the remainder of preprocessing.
     uint32_t maxIncludeDepth = 1024;
 
     /// The version of the SystemVerilog language to use.
@@ -553,6 +554,9 @@ private:
     TokenKind expectedEndKind = TokenKind::Unknown;
     bool cellDefine = false;
     bool hasProtectedCode = false;
+
+    /// Whether a nonzero depth limit has disabled further include expansion.
+    bool includeDepthExceeded = false;
 
     int designElementDepth = 0;
     uint32_t includeDepth = 0;

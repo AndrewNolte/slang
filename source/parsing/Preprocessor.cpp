@@ -680,9 +680,12 @@ Trivia Preprocessor::handleIncludeDirective(Token directive) {
 
         SourceBuffer sourceBuffer;
         if (includeDepth >= options.maxIncludeDepth) {
-            addDiag(diag::ExceededMaxIncludeDepth, fileName.range());
+            if (!includeDepthExceeded)
+                addDiag(diag::ExceededMaxIncludeDepth, fileName.range());
+            // Block later recursive branches as the include stack unwinds.
+            includeDepthExceeded = options.maxIncludeDepth != 0;
         }
-        else {
+        else if (!includeDepthExceeded) {
             auto buffer = sourceManager.readHeader(path, directive.location(), getCurrentLibrary(),
                                                    isSystem, options.additionalIncludePaths);
             if (!buffer) {

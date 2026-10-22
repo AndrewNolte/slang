@@ -2127,6 +2127,43 @@ TEST_CASE("Preprocessor max include depth regress GH #600") {
     CHECK_DIAGNOSTICS_EMPTY;
 }
 
+TEST_CASE("Include depth errors stop subsequent recursive expansion") {
+    SourceManager sm;
+    auto root = fs::current_path();
+    std::string text = "`include \"first.svh\"\n`include \"first.svh\"\n";
+    SECTION("Self includes") {
+    }
+    SECTION("Mutual includes") {
+        sm.assignText((root / "second.svh").string(), text);
+        text = "`include \"second.svh\"\n`include \"second.svh\"\n";
+    }
+    SECTION("Macro-expanded includes") {
+        text = "`define AGAIN `include \"first.svh\"\n`AGAIN\n`AGAIN\n";
+    }
+    auto buffer = sm.assignText((root / "first.svh").string(), text);
+    auto tree = SyntaxTree::fromBuffer(buffer, sm, Bag(PreprocessorOptions{.maxIncludeDepth = 4}));
+
+    REQUIRE(tree->diagnostics().size() == 1);
+    CHECK(tree->diagnostics()[0].code == diag::ExceededMaxIncludeDepth);
+    CHECK(tree->getIncludeDirectives().size() == 10);
+    CHECK(std::ranges::count_if(tree->getIncludeDirectives(),
+                                [](const auto& include) { return bool(include.buffer); }) == 4);
+}
+
+TEST_CASE("Include depth limit permits repeated nonrecursive includes") {
+    SourceManager sm;
+    auto root = fs::current_path();
+    sm.assignText((root / "leaf.svh").string(), "logic value;\n");
+    auto buffer = sm.assignText((root / "source.sv").string(),
+                                "`include \"leaf.svh\"\n`include \"leaf.svh\"\n");
+    auto tree = SyntaxTree::fromBuffer(buffer, sm, Bag(PreprocessorOptions{.maxIncludeDepth = 1}));
+
+    CHECK(tree->diagnostics().empty());
+    REQUIRE(tree->getIncludeDirectives().size() == 2);
+    for (const auto& include : tree->getIncludeDirectives())
+        CHECK(include.buffer);
+}
+
 TEST_CASE("Pragma protect error handling") {
     auto& text = R"(
 `pragma protect
